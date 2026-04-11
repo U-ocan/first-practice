@@ -3,13 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Perfect Sound Restore</title>
+    <title>Dots Game - With Timer</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
             background: #121212; color: #e0e0e0; font-family: sans-serif; touch-action: none; 
         }
-        #score-container { font-size: 28px; margin-bottom: 20px; font-weight: bold; }
+        /* スコアと時間のレイアウト調整 */
+        #info-container { 
+            display: flex; gap: 30px; font-size: 24px; margin-bottom: 20px; font-weight: bold; 
+        }
+        .info-item { min-width: 120px; text-align: center; }
+        
         canvas { background: #1e1e1e; border-radius: 12px; cursor: crosshair; touch-action: none; }
         #controls { margin-top: 25px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
         button { padding: 14px 28px; font-size: 16px; border-radius: 30px; border: 1px solid #444; background: #2c2c2c; color: #fff; cursor: pointer; }
@@ -19,7 +24,11 @@
 </head>
 <body>
 
-    <div id="score-container">Score: <span id="score">0</span></div>
+    <div id="info-container">
+        <div class="info-item">Score: <span id="score">0</span></div>
+        <div class="info-item">Time: <span id="timer">00:00</span></div>
+    </div>
+    
     <canvas id="gameCanvas"></canvas>
     
     <div id="controls">
@@ -30,6 +39,7 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
+    const timerEl = document.getElementById('timer');
 
     const ROWS = 6;
     const COLS = 6;
@@ -45,7 +55,11 @@
     let history = [];
     const UNDO_COST = 5;
 
-    // --- ご提示いただいたコードから100%忠実に移植したサウンドセクション ---
+    // --- タイマー用変数 ---
+    let startTime;
+    let timerInterval = null;
+
+    // --- サウンドセクション ---
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     let audioCtx;
 
@@ -89,6 +103,20 @@
             osc.start();
             osc.stop(audioCtx.currentTime + 0.4);
         });
+    }
+
+    // --- タイマー制御 ---
+    function startTimer() {
+        if (timerInterval) return; // 既に動いていれば何もしない
+        startTime = Date.now();
+        timerInterval = setInterval(updateTimer, 1000);
+    }
+
+    function updateTimer() {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+        const secs = (elapsed % 60).toString().padStart(2, '0');
+        timerEl.innerText = `${mins}:${secs}`;
     }
 
     function initGrid() {
@@ -164,12 +192,13 @@
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
         initAudio();
+        startTimer(); // 最初のタッチでタイマー開始
         saveState();
         const pos = getPos(e);
         if (pos) { 
             isDragging = true; 
             selectedPath = [pos]; 
-            playDotSound(0); // 1つ目の音
+            playDotSound(0);
             draw(); 
         }
     });
@@ -184,7 +213,6 @@
         const rDiff = Math.abs(pos.r - last.r);
         const cDiff = Math.abs(pos.c - last.c);
         
-        // 斜め移動禁止（上下左右のみ、距離が1）
         if (grid[pos.r][pos.c] === color && (rDiff + cDiff === 1)) {
             const alreadyIdx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
             
@@ -196,7 +224,7 @@
             } else if (alreadyIdx === 0 && selectedPath.length >= 3) {
                 selectedPath.push(pos);
                 isLooping = true;
-                playDotSound(selectedPath.length - 1, true); // 特殊音
+                playDotSound(selectedPath.length - 1, true);
                 draw();
             }
         }
@@ -211,7 +239,7 @@
             const isActuallyLoop = selectedPath.length >= 4 && first.r === last.r && first.c === last.c;
             const color = grid[first.r][first.c];
 
-            playClearSound(isActuallyLoop); // 消去時の和音
+            playClearSound(isActuallyLoop);
 
             if (isActuallyLoop) {
                 for (let r = 0; r < ROWS; r++) {
