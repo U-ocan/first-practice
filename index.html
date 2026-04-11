@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Original Sound Restored</title>
+    <title>Dots Game - Original Sound Restoration</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
             background: #121212; color: #e0e0e0; font-family: sans-serif; touch-action: none; 
         }
         #score-container { font-size: 28px; margin-bottom: 20px; font-weight: bold; }
-        canvas { background: #1e1e1e; border-radius: 12px; cursor: crosshair; }
+        canvas { background: #1e1e1e; border-radius: 12px; cursor: crosshair; touch-action: none; }
         #controls { margin-top: 25px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
         button { padding: 14px 28px; font-size: 16px; border-radius: 30px; border: 1px solid #444; background: #2c2c2c; color: #fff; cursor: pointer; }
         button:active { background: #3d3d3d; }
@@ -52,7 +52,7 @@
         }
     }
 
-    // --- 初期の音質・音階ロジックに完全復元 ---
+    // --- 【完全復元】初期のサウンドロジック ---
     function playTone(index) {
         if (!audioCtx) return;
         if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -60,16 +60,17 @@
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         
-        osc.type = 'sine'; // 初期の澄んだ音質
-        // 繋ぐたびに上がる音階
-        osc.frequency.setValueAtTime(440 * Math.pow(1.06, index), audioCtx.currentTime);
+        osc.type = 'sine';
+        // 初期の正確な音階上昇（1.059倍 = 半音ずつ上がる設定）
+        osc.frequency.setValueAtTime(440 * Math.pow(1.059, index), audioCtx.currentTime);
         
         gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        // 余韻の長さも初期の0.5秒に戻しました
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
         
         osc.connect(gain).connect(audioCtx.destination);
         osc.start();
-        osc.stop(audioCtx.currentTime + 0.3);
+        osc.stop(audioCtx.currentTime + 0.5);
     }
 
     function initGrid() {
@@ -148,30 +149,39 @@
         initAudio();
         saveState();
         const pos = getPos(e);
-        if (pos) { isDragging = true; selectedPath = [pos]; draw(); }
+        if (pos) { 
+            isDragging = true; 
+            selectedPath = [pos]; 
+            playTone(0); 
+            draw(); 
+        }
     });
 
     canvas.addEventListener('touchmove', (e) => {
         if (!isDragging) return;
-        const pos = getPos(e); if (!pos) return;
+        const pos = getPos(e);
+        if (!pos) return;
+
         const last = selectedPath[selectedPath.length - 1];
         if (pos.r === last.r && pos.c === last.c) return;
-        
+
         const color = grid[selectedPath[0].r][selectedPath[0].c];
-        if (grid[pos.r][pos.c] === color && Math.abs(pos.r - last.r) <= 1 && Math.abs(pos.c - last.c) <= 1) {
+        const isNeighbor = Math.abs(pos.r - last.r) <= 1 && Math.abs(pos.c - last.c) <= 1;
+        
+        if (grid[pos.r][pos.c] === color && isNeighbor) {
             const alreadyIdx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
+            
             if (alreadyIdx === -1) {
                 selectedPath.push(pos);
                 isLooping = false;
-                // 繋ぐたびに音を鳴らす（初期の挙動）
-                playTone(selectedPath.length);
+                playTone(selectedPath.length - 1); // 繋ぐたびに鳴らす
+                draw();
             } else if (alreadyIdx === 0 && selectedPath.length >= 3) {
                 selectedPath.push(pos);
                 isLooping = true;
-                // ループ完成時も音を鳴らす
-                playTone(selectedPath.length + 5);
+                playTone(selectedPath.length + 2); // ループ時の少し高い音
+                draw();
             }
-            draw();
         }
     });
 
@@ -210,8 +220,10 @@
         }
     }
 
-    canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
-    initGrid(); draw();
+    canvas.width = COLS * SPACING; 
+    canvas.height = ROWS * SPACING;
+    initGrid(); 
+    draw();
 </script>
 </body>
 </html>
