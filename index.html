@@ -27,6 +27,9 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
+let score = 0; // スコア管理用の変数
+let history = []; // 盤面の状態を記録する箱
+const UNDO_COST = 5; // Undoに必要なポイント
 const timeEl = document.getElementById('time');
 
 const ROWS = 6, COLS = 6;
@@ -134,11 +137,11 @@ canvas.addEventListener('touchstart', (e) => {
         selectedPath = [pos]; 
         isLooping = false;
         playDotSound(0);
-        draw(); 
+        draw(); .
     }
 }, {passive: false});
 
-window.addEventListener('touchmove', (e) => {
+window.addEventListener('touchmove', (e) => {.
     if (!isDragging) return;
     const pos = getPos(e);
     if (!pos) return;
@@ -165,6 +168,16 @@ window.addEventListener('touchmove', (e) => {
 }, {passive: false});
 
 window.addEventListener('touchend', () => {
+    window.addEventListener('touchend', (e) => {
+    if (!isDragging) return;
+    
+    // ★ ここに保存処理を追加！
+    // 実際にドットを消してスコアが入る「直前」の状態を保存します
+    saveState(); 
+
+    isDragging = false;
+    // ...あとの判定ロジック（selectedPath.length >= 2 など）はそのまま
+
     if (!isDragging) return;
     isDragging = false;
     
@@ -261,6 +274,32 @@ function draw() {
     }
 }
 
+// 今の状態を保存する関数
+function saveState() {
+    const state = {
+        grid: grid.map(row => [...row]),
+        score: score
+    };
+    history.push(JSON.stringify(state));
+    if (history.length > 20) history.shift(); // 履歴は最大20手まで
+}
+
+// 5点消費して一手戻す関数
+function undo() {
+    if (history.length > 0 && score >= UNDO_COST) {
+        score -= UNDO_COST;
+        const lastState = JSON.parse(history.pop());
+        grid = lastState.grid;
+        scoreEl.innerText = score; // 画面のスコア表示を更新
+        draw();
+    } else if (score < UNDO_COST) {
+        // スコアが足りない時の演出
+        scoreEl.style.color = 'red';
+        setTimeout(() => scoreEl.style.color = 'black', 500);
+    }
+}
+.
+
 function resetGame() { score = 0; startTime = Date.now(); scoreEl.innerText = score; initGrid(); draw(); }
 window.addEventListener('resize', () => { canvas.width = canvas.height = Math.min(window.innerWidth - 40, 400); draw(); });
 setInterval(() => {
@@ -271,6 +310,13 @@ setInterval(() => {
 canvas.width = canvas.height = Math.min(window.innerWidth - 40, 400);
 initGrid();
 draw();
+// Undoボタンを作成して画面に追加
+const undoBtn = document.createElement('button');
+undoBtn.innerHTML = `Undo <span style="font-size: 0.8em; opacity: 0.7;">(-5pts)</span>`;
+undoBtn.style = "margin: 10px; padding: 10px 20px; font-size: 16px; border-radius: 20px; border: 1px solid #ccc; background: white; cursor: pointer;";
+undoBtn.onclick = undo;
+document.body.appendChild(undoBtn);
+
 </script>
 </body>
 </html>
