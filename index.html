@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Classic Sound Edition</title>
+    <title>Dots Game - Perfect Sound Restore</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -45,19 +45,20 @@
     let history = [];
     const UNDO_COST = 5;
 
-    // --- 指定された古いコードから移植したサウンドエンジン ---
-    let audioCtx = null;
+    // --- ご提示いただいたコードから100%忠実に移植したサウンドセクション ---
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx;
+
     function initAudio() {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (!audioCtx) audioCtx = new AudioContext();
         if (audioCtx.state === 'suspended') audioCtx.resume();
     }
 
-    // なぞっている時の音（11音のスケール）
     function playDotSound(step, isSpecial = false) {
         if (!audioCtx) return;
         const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00, 1046.50];
         let freq = scale[Math.min(step, scale.length - 1)];
-        if (isSpecial) freq *= 2.0; // ループ完成時は1オクターブ上げる
+        if (isSpecial) freq *= 2.0;
 
         const osc = audioCtx.createOscillator();
         const gainNode = audioCtx.createGain();
@@ -72,7 +73,6 @@
         osc.stop(audioCtx.currentTime + 0.3);
     }
 
-    // 消した瞬間の和音（これが「ハーモニカのような」心地よさの正体です）
     function playClearSound(isLoop = false) {
         if (!audioCtx) return;
         const freqs = isLoop ? [523.25, 659.25, 783.99, 1046.50] : [523.25, 659.25, 783.99];
@@ -167,7 +167,8 @@
         saveState();
         const pos = getPos(e);
         if (pos) { 
-            isDragging = true; selectedPath = [pos]; 
+            isDragging = true; 
+            selectedPath = [pos]; 
             playDotSound(0); // 1つ目の音
             draw(); 
         }
@@ -183,19 +184,19 @@
         const rDiff = Math.abs(pos.r - last.r);
         const cDiff = Math.abs(pos.c - last.c);
         
-        // 斜め移動禁止（上下左右のみ）
+        // 斜め移動禁止（上下左右のみ、距離が1）
         if (grid[pos.r][pos.c] === color && (rDiff + cDiff === 1)) {
             const alreadyIdx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
             
             if (alreadyIdx === -1) {
                 selectedPath.push(pos);
                 isLooping = false;
-                playDotSound(selectedPath.length - 1); // なぞり音
+                playDotSound(selectedPath.length - 1); 
                 draw();
             } else if (alreadyIdx === 0 && selectedPath.length >= 3) {
                 selectedPath.push(pos);
                 isLooping = true;
-                playDotSound(selectedPath.length - 1, true); // ループ完成音
+                playDotSound(selectedPath.length - 1, true); // 特殊音
                 draw();
             }
         }
