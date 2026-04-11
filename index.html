@@ -3,15 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - U Edition</title>
+    <title>Dots Game - Dark Mode Edition</title>
     <style>
-        body { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #f0f0f0; font-family: sans-serif; touch-action: none; }
-        #score-container { font-size: 24px; margin-bottom: 10px; }
-        canvas { background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; cursor: crosshair; }
-        #controls { margin-top: 15px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-        button { padding: 12px 24px; font-size: 16px; border-radius: 25px; border: 1px solid #ccc; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); cursor: pointer; transition: 0.2s; }
-        button:active { transform: translateY(2px); box-shadow: none; background: #eee; }
-        .cost-label { font-size: 0.8em; color: #666; }
+        /* ダークモード用のスタイル設定 */
+        body { 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            background: #121212; /* 深い黒 */
+            color: #e0e0e0; /* 明るいグレーの文字 */
+            font-family: 'Helvetica Neue', Arial, sans-serif; 
+            touch-action: none; 
+        }
+        #score-container { 
+            font-size: 28px; 
+            margin-bottom: 20px; 
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+        canvas { 
+            background: #1e1e1e; /* キャンバスも暗く */
+            box-shadow: 0 0 20px rgba(0,0,0,0.5); 
+            border-radius: 12px; 
+            cursor: crosshair; 
+        }
+        #controls { 
+            margin-top: 25px; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            gap: 15px; 
+        }
+        button { 
+            padding: 14px 28px; 
+            font-size: 16px; 
+            border-radius: 30px; 
+            border: 1px solid #444; 
+            background: #2c2c2c; 
+            color: #fff;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
+            cursor: pointer; 
+            transition: all 0.2s; 
+        }
+        button:active { 
+            transform: translateY(2px); 
+            box-shadow: none; 
+            background: #3d3d3d; 
+        }
+        .cost-label { 
+            font-size: 0.8em; 
+            color: #aaa; 
+            margin-left: 5px;
+        }
     </style>
 </head>
 <body>
@@ -32,7 +78,8 @@
     const COLS = 6;
     const DOT_SIZE = 15;
     const SPACING = 50;
-    const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
+    // ダークモードに映える鮮やかなパレット
+    const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#E040FB'];
 
     let grid = [];
     let score = 0;
@@ -42,7 +89,6 @@
     let history = [];
     const UNDO_COST = 5;
 
-    // オーディオコンテキストの初期化
     let audioCtx = null;
     function initAudio() {
         if (!audioCtx) {
@@ -50,12 +96,10 @@
         }
     }
 
-    // 重低音を強化したサウンド
     function playClearSound(isLoop) {
         if (!audioCtx) return;
         if (audioCtx.state === 'suspended') audioCtx.resume();
 
-        // メイン音（高音・中音）
         const osc1 = audioCtx.createOscillator();
         const gain1 = audioCtx.createGain();
         osc1.type = 'triangle';
@@ -66,7 +110,7 @@
         osc1.start();
         osc1.stop(audioCtx.currentTime + 0.5);
 
-        // 重低音（振動の代わり）
+        // 重低音
         const subOsc = audioCtx.createOscillator();
         const subGain = audioCtx.createGain();
         subOsc.type = 'sine';
@@ -97,7 +141,7 @@
     }
 
     function undo() {
-        initAudio(); // ユーザー操作でオーディオ有効化
+        initAudio();
         if (history.length > 0 && score >= UNDO_COST) {
             score -= UNDO_COST;
             const lastState = JSON.parse(history.pop());
@@ -105,8 +149,8 @@
             scoreEl.innerText = score;
             draw();
         } else if (score < UNDO_COST) {
-            scoreEl.style.color = 'red';
-            setTimeout(() => scoreEl.style.color = 'black', 500);
+            scoreEl.style.color = '#FF5252';
+            setTimeout(() => scoreEl.style.color = '#e0e0e0', 500);
         }
     }
 
@@ -116,8 +160,11 @@
         // パスの描画
         if (selectedPath.length > 0) {
             ctx.beginPath();
-            ctx.lineWidth = 5;
-            ctx.strokeStyle = isLooping ? 'rgba(0,0,0,0.5)' : grid[selectedPath[0].r][selectedPath[0].c];
+            ctx.lineWidth = 6;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            const color = grid[selectedPath[0].r][selectedPath[0].c];
+            ctx.strokeStyle = isLooping ? 'rgba(255,255,255,0.8)' : color;
             selectedPath.forEach((p, i) => {
                 const x = p.c * SPACING + SPACING / 2;
                 const y = p.r * SPACING + SPACING / 2;
@@ -131,17 +178,22 @@
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
                 if (grid[r][c]) {
+                    const x = c * SPACING + SPACING / 2;
+                    const y = r * SPACING + SPACING / 2;
+                    
+                    // 選択中のドットに光彩エフェクト
+                    const isSelected = selectedPath.some(p => p.r === r && p.c === c);
+                    if (isSelected) {
+                        ctx.beginPath();
+                        ctx.arc(x, y, DOT_SIZE + 4, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                        ctx.fill();
+                    }
+
                     ctx.beginPath();
-                    ctx.arc(c * SPACING + SPACING / 2, r * SPACING + SPACING / 2, DOT_SIZE, 0, Math.PI * 2);
+                    ctx.arc(x, y, DOT_SIZE, 0, Math.PI * 2);
                     ctx.fillStyle = grid[r][c];
                     ctx.fill();
-                    
-                    // 選択中のドットを強調
-                    if (selectedPath.some(p => p.r === r && p.c === c)) {
-                        ctx.lineWidth = 3;
-                        ctx.strokeStyle = 'white';
-                        ctx.stroke();
-                    }
                 }
             }
         }
@@ -159,7 +211,7 @@
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
         initAudio();
-        saveState(); // 操作前に現在の状態を保存
+        saveState();
         const pos = getPos(e);
         if (pos) {
             isDragging = true;
@@ -178,7 +230,6 @@
 
         const color = grid[selectedPath[0].r][selectedPath[0].c];
         if (grid[pos.r][pos.c] === color && Math.abs(pos.r - last.r) <= 1 && Math.abs(pos.c - last.c) <= 1) {
-            
             const existingIndex = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
             if (existingIndex !== -1 && existingIndex !== selectedPath.length - 1) {
                 isLooping = true;
@@ -196,29 +247,22 @@
 
         if (selectedPath.length >= 2) {
             const first = selectedPath[0];
-            const last = selectedPath[selectedPath.length - 1];
-            const isActuallyLoop = selectedPath.length >= 4 && first.r === last.r && first.c === last.c;
+            const isActuallyLoop = selectedPath.length >= 4 && 
+                                   first.r === selectedPath[selectedPath.length-1].r && 
+                                   first.c === selectedPath[selectedPath.length-1].c;
             const color = grid[first.r][first.c];
 
             playClearSound(isActuallyLoop);
 
             if (isActuallyLoop) {
-                // 四角形消去：同じ色のドットを全て消す
                 for (let r = 0; r < ROWS; r++) {
                     for (let c = 0; c < COLS; c++) {
-                        if (grid[r][c] === color) {
-                            grid[r][c] = null;
-                            score++;
-                        }
+                        if (grid[r][c] === color) { grid[r][c] = null; score++; }
                     }
                 }
             } else {
-                // 通常消去
                 selectedPath.forEach(p => {
-                    if (grid[p.r][p.c]) {
-                        grid[p.r][p.c] = null;
-                        score++;
-                    }
+                    if (grid[p.r][p.c]) { grid[p.r][p.c] = null; score++; }
                 });
             }
             dropDots();
