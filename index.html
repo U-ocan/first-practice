@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Original Sound Restoration</title>
+    <title>Dots Game - Original Harmony & Orthogonal Edition</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -52,25 +52,32 @@
         }
     }
 
-    // --- 【完全復元】初期のサウンドロジック ---
-    function playTone(index) {
+    // --- 【完全復元】ハーモニカ風の複音サウンド ---
+    function playTone(index, forceLoopPitch = false) {
         if (!audioCtx) return;
         if (audioCtx.state === 'suspended') audioCtx.resume();
         
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        
-        osc.type = 'sine';
-        // 初期の正確な音階上昇（1.059倍 = 半音ずつ上がる設定）
-        osc.frequency.setValueAtTime(440 * Math.pow(1.059, index), audioCtx.currentTime);
-        
-        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-        // 余韻の長さも初期の0.5秒に戻しました
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
-        
-        osc.connect(gain).connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.5);
+        const now = audioCtx.currentTime;
+        // ループ時は音階を大幅に引き上げる（初期仕様）
+        const pitchIndex = forceLoopPitch ? index + 8 : index;
+        const baseFreq = 440 * Math.pow(1.059, pitchIndex);
+
+        // ハーモニカのような厚みを出すため、2つの波形を重ねる（初期の音色）
+        [baseFreq, baseFreq * 2].forEach((freq, i) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            // 初期の「ハーモニカ風」は三角形波（triangle）を混ぜていました
+            osc.type = i === 0 ? 'triangle' : 'sine';
+            osc.frequency.setValueAtTime(freq, now);
+            
+            gain.gain.setValueAtTime(i === 0 ? 0.1 : 0.05, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+            
+            osc.connect(gain).connect(audioCtx.destination);
+            osc.start();
+            osc.stop(now + 0.4);
+        });
     }
 
     function initGrid() {
@@ -166,20 +173,25 @@
         if (pos.r === last.r && pos.c === last.c) return;
 
         const color = grid[selectedPath[0].r][selectedPath[0].c];
-        const isNeighbor = Math.abs(pos.r - last.r) <= 1 && Math.abs(pos.c - last.c) <= 1;
         
-        if (grid[pos.r][pos.c] === color && isNeighbor) {
+        // --- 【修正】斜め移動を禁止（上下左右のみ許可） ---
+        const rowDiff = Math.abs(pos.r - last.r);
+        const colDiff = Math.abs(pos.c - last.c);
+        const isOrthogonal = (rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1);
+        
+        if (grid[pos.r][pos.c] === color && isOrthogonal) {
             const alreadyIdx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
             
             if (alreadyIdx === -1) {
                 selectedPath.push(pos);
                 isLooping = false;
-                playTone(selectedPath.length - 1); // 繋ぐたびに鳴らす
+                playTone(selectedPath.length - 1);
                 draw();
             } else if (alreadyIdx === 0 && selectedPath.length >= 3) {
                 selectedPath.push(pos);
                 isLooping = true;
-                playTone(selectedPath.length + 2); // ループ時の少し高い音
+                // ループ完成時にピッチを大きく上げる（初期の演出）
+                playTone(selectedPath.length, true);
                 draw();
             }
         }
