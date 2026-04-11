@@ -2,320 +2,254 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Dots Endless Pro - Square Glow</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dots Game - U Edition</title>
     <style>
-        body { margin: 0; background-color: #1a1a1a; color: #fff; font-family: -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; touch-action: none; }
-        #ui { width: 100%; max-width: 400px; display: flex; justify-content: space-between; align-items: center; padding: 20px; box-sizing: border-box; }
-        .stat-box { text-align: center; }
-        .label { font-size: 12px; color: #aaa; }
-        .value { font-size: 24px; font-weight: bold; }
-        canvas { background-color: #1a1a1a; cursor: pointer; }
-        button { background: #444; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; }
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #f0f0f0; font-family: sans-serif; touch-action: none; }
+        #score-container { font-size: 24px; margin-bottom: 10px; }
+        canvas { background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; cursor: crosshair; }
+        #controls { margin-top: 15px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        button { padding: 12px 24px; font-size: 16px; border-radius: 25px; border: 1px solid #ccc; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); cursor: pointer; transition: 0.2s; }
+        button:active { transform: translateY(2px); box-shadow: none; background: #eee; }
+        .cost-label { font-size: 0.8em; color: #666; }
     </style>
 </head>
 <body>
 
-<div id="ui">
-    <div class="stat-box"><div class="label">SCORE</div><div id="score" class="value">0</div></div>
-    <div class="stat-box"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
-    <button onclick="resetGame()">RESET</button>
-</div>
-<canvas id="gameCanvas"></canvas>
+    <div id="score-container">Score: <span id="score">0</span></div>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="controls">
+        <button onclick="undo()">Undo <span class="cost-label">(-5pts)</span></button>
+    </div>
 
 <script>
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const scoreEl = document.getElementById('score');
-let score = 0; // スコア管理用の変数
-let history = []; // 盤面の状態を記録する箱
-const UNDO_COST = 5; // Undoに必要なポイント
-const timeEl = document.getElementById('time');
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
 
-const ROWS = 6, COLS = 6;
-const DOT_COLORS = ['#FF3B30', '#4CD964', '#007AFF', '#FFCC00', '#AF52DE'];
-const DOT_RADIUS = 14; 
+    const ROWS = 6;
+    const COLS = 6;
+    const DOT_SIZE = 15;
+    const SPACING = 50;
+    const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
 
-let grid = [], selectedPath = [], score = 0, startTime = Date.now(), isDragging = false;
-let isLooping = false; // ループ状態を保持
+    let grid = [];
+    let score = 0;
+    let selectedPath = [];
+    let isDragging = false;
+    let isLooping = false;
+    let history = [];
+    const UNDO_COST = 5;
 
-// --- Web Audio API ---
-const AudioContext = window.AudioContext || window.webkitAudioContext;
-let audioCtx;
-
-function initAudio() {
-    if (!audioCtx) audioCtx = new AudioContext();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    window.removeEventListener('touchstart', initAudio);
-}
-window.addEventListener('touchstart', initAudio);
-
-function playDotSound(step, isSpecial = false) {
-    if (!audioCtx) return;
-    const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00, 1046.50];
-    let freq = scale[Math.min(step, scale.length - 1)];
-    if (isSpecial) freq *= 2.0;
-
-    const osc = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-    gainNode.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.01);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-    osc.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.3);
-}
-
-function playClearSound(isLoop = false) {
-    if (!audioCtx) return;
-    const freqs = isLoop ? [523.25, 659.25, 783.99, 1046.50] : [523.25, 659.25, 783.99];
-    freqs.forEach(freq => {
-        const osc = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-        gainNode.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.05);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
-        osc.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.4);
-    });
-}
-
-function initGrid() {
-    grid = [];
-    for (let r = 0; r < ROWS; r++) {
-        grid[r] = [];
-        for (let c = 0; c < COLS; c++) grid[r][c] = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
-    }
-    ensurePossibleMoves();
-}
-
-function checkPossibleMoves() {
-    for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-            if (c + 1 < COLS && grid[r][c+1] === grid[r][c]) return true;
-            if (r + 1 < ROWS && grid[r+1][c] === grid[r][c]) return true;
+    // オーディオコンテキストの初期化
+    let audioCtx = null;
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
     }
-    return false;
-}
 
-function ensurePossibleMoves() {
-    while (!checkPossibleMoves()) {
-        let allDots = grid.flat();
-        for (let i = allDots.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [allDots[i], allDots[j]] = [allDots[j], allDots[i]];
-        }
-        let idx = 0;
+    // 重低音を強化したサウンド
+    function playClearSound(isLoop) {
+        if (!audioCtx) return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        // メイン音（高音・中音）
+        const osc1 = audioCtx.createOscillator();
+        const gain1 = audioCtx.createGain();
+        osc1.type = 'triangle';
+        osc1.frequency.setValueAtTime(isLoop ? 880 : 440, audioCtx.currentTime);
+        gain1.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+        osc1.connect(gain1).connect(audioCtx.destination);
+        osc1.start();
+        osc1.stop(audioCtx.currentTime + 0.5);
+
+        // 重低音（振動の代わり）
+        const subOsc = audioCtx.createOscillator();
+        const subGain = audioCtx.createGain();
+        subOsc.type = 'sine';
+        subOsc.frequency.setValueAtTime(isLoop ? 65 : 45, audioCtx.currentTime);
+        subGain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+        subGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        subOsc.connect(subGain).connect(audioCtx.destination);
+        subOsc.start();
+        subOsc.stop(audioCtx.currentTime + 0.4);
+    }
+
+    function initGrid() {
         for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) grid[r][c] = allDots[idx++];
-        }
-    }
-}
-
-function getPos(e) {
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const cellSize = canvas.width / COLS;
-    const col = Math.floor((clientX - rect.left) / cellSize);
-    const row = Math.floor((clientY - rect.top) / cellSize);
-    return (row >= 0 && row < ROWS && col >= 0 && col < COLS) ? { r: row, c: col } : null;
-}
-
-canvas.addEventListener('touchstart', (e) => {
-    const pos = getPos(e);
-    if (pos) { 
-        isDragging = true; 
-        selectedPath = [pos]; 
-        isLooping = false;
-        playDotSound(0);
-        draw(); .
-    }
-}, {passive: false});
-
-window.addEventListener('touchmove', (e) => {.
-    if (!isDragging) return;
-    const pos = getPos(e);
-    if (!pos) return;
-    const last = selectedPath[selectedPath.length - 1];
-    if (pos.r === last.r && pos.c === last.c) return;
-    
-    if (Math.abs(pos.r - last.r) + Math.abs(pos.c - last.c) === 1 && grid[pos.r][pos.c] === grid[last.r][last.c]) {
-        // 戻る操作の判定
-        if (selectedPath.length > 1 && pos.r === selectedPath[selectedPath.length-2].r && pos.c === selectedPath[selectedPath.length-2].c) {
-            selectedPath.pop();
-            isLooping = false;
-        } else if (!selectedPath.some(p => p.r === pos.r && p.c === pos.c)) {
-            selectedPath.push(pos);
-            isLooping = false;
-            playDotSound(selectedPath.length - 1);
-        } else if (pos.r === selectedPath[0].r && pos.c === selectedPath[0].c && selectedPath.length >= 4) {
-            // ループ完成
-            selectedPath.push(pos);
-            isLooping = true;
-            playDotSound(selectedPath.length - 1, true);
-        }
-    }
-    draw();
-}, {passive: false});
-
-window.addEventListener('touchend', () => {
-    window.addEventListener('touchend', (e) => {
-    if (!isDragging) return;
-    
-    // ★ ここに保存処理を追加！
-    // 実際にドットを消してスコアが入る「直前」の状態を保存します
-    saveState(); 
-
-    isDragging = false;
-    // ...あとの判定ロジック（selectedPath.length >= 2 など）はそのまま
-
-    if (!isDragging) return;
-    isDragging = false;
-    
-    if (selectedPath.length >= 2) {
-        const first = selectedPath[0];
-        const last = selectedPath[selectedPath.length - 1];
-        const isActuallyLoop = selectedPath.length >= 4 && first.r === last.r && first.c === last.c;
-        const color = grid[first.r][first.c];
-
-        playClearSound(isActuallyLoop);
-
-        if (isActuallyLoop) {
-// ★ここにバイブレーションを挿入します
-            // iOSは navigator.vibrate([200]) のように配列形式を好む場合があります
-            if (navigator.vibrate) {
-                navigator.vibrate(200); 
+            grid[r] = [];
+            for (let c = 0; c < COLS; c++) {
+                grid[r][c] = COLORS[Math.floor(Math.random() * COLORS.length)];
             }
-            for (let r = 0; r < ROWS; r++) {
-                for (let c = 0; c < COLS; c++) if (grid[r][c] === color) { grid[r][c] = null; score++; }
-            }
-        } else {
-            selectedPath.forEach(p => { grid[p.r][p.c] = null; score++; });
         }
-        dropDots();
-        ensurePossibleMoves();
-        scoreEl.innerText = score;
     }
-    selectedPath = [];
-    isLooping = false;
-    draw();
-});
 
-function dropDots() {
-    for (let c = 0; c < COLS; c++) {
-        let empty = 0;
-        for (let r = ROWS - 1; r >= 0; r--) {
-            if (grid[r][c] === null) empty++;
-            else if (empty > 0) { grid[r + empty][c] = grid[r][c]; grid[r][c] = null; }
+    function saveState() {
+        const state = {
+            grid: grid.map(row => [...row]),
+            score: score
+        };
+        history.push(JSON.stringify(state));
+        if (history.length > 20) history.shift();
+    }
+
+    function undo() {
+        initAudio(); // ユーザー操作でオーディオ有効化
+        if (history.length > 0 && score >= UNDO_COST) {
+            score -= UNDO_COST;
+            const lastState = JSON.parse(history.pop());
+            grid = lastState.grid;
+            scoreEl.innerText = score;
+            draw();
+        } else if (score < UNDO_COST) {
+            scoreEl.style.color = 'red';
+            setTimeout(() => scoreEl.style.color = 'black', 500);
         }
-        for (let i = 0; i < empty; i++) grid[i][c] = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
     }
-}
 
-function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const cellSize = canvas.width / COLS;
-
-    // 線の描画
-    if (selectedPath.length > 1) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.strokeStyle = grid[selectedPath[0].r][selectedPath[0].c];
-        ctx.lineWidth = isLooping ? 8 : 6;
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        // ループ時は線自体も少し光らせる
-        if (isLooping) {
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#fff';
+        // パスの描画
+        if (selectedPath.length > 0) {
+            ctx.beginPath();
+            ctx.lineWidth = 5;
+            ctx.strokeStyle = isLooping ? 'rgba(0,0,0,0.5)' : grid[selectedPath[0].r][selectedPath[0].c];
+            selectedPath.forEach((p, i) => {
+                const x = p.c * SPACING + SPACING / 2;
+                const y = p.r * SPACING + SPACING / 2;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
         }
 
-        selectedPath.forEach((p, i) => {
-            const x = p.c * cellSize + cellSize / 2, y = p.r * cellSize + cellSize / 2;
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ctx.restore();
-    }
-
-    for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-            const x = c * cellSize + cellSize / 2, y = r * cellSize + cellSize / 2;
-            const isSelected = selectedPath.some(p => p.r === r && p.c === c);
-
-            ctx.save();
-            // ループ完成時に周りを光らせる効果
-            if (isLooping && isSelected) {
-                ctx.shadowBlur = 15;
-                ctx.shadowColor = '#fff';
-            }
-
-            ctx.beginPath(); 
-            ctx.arc(x, y, DOT_RADIUS, 0, Math.PI * 2);
-            ctx.fillStyle = grid[r][c]; 
-            ctx.fill();
-            ctx.restore();
-
-            // 選択中の白枠
-            if (isSelected) {
-                ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS + 4, 0, Math.PI * 2);
-                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+        // ドットの描画
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c]) {
+                    ctx.beginPath();
+                    ctx.arc(c * SPACING + SPACING / 2, r * SPACING + SPACING / 2, DOT_SIZE, 0, Math.PI * 2);
+                    ctx.fillStyle = grid[r][c];
+                    ctx.fill();
+                    
+                    // 選択中のドットを強調
+                    if (selectedPath.some(p => p.r === r && p.c === c)) {
+                        ctx.lineWidth = 3;
+                        ctx.strokeStyle = 'white';
+                        ctx.stroke();
+                    }
+                }
             }
         }
     }
-}
 
-// 今の状態を保存する関数
-function saveState() {
-    const state = {
-        grid: grid.map(row => [...row]),
-        score: score
-    };
-    history.push(JSON.stringify(state));
-    if (history.length > 20) history.shift(); // 履歴は最大20手まで
-}
+    function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const c = Math.floor((clientX - rect.left) / SPACING);
+        const r = Math.floor((clientY - rect.top) / SPACING);
+        return (r >= 0 && r < ROWS && c >= 0 && c < COLS) ? {r, c} : null;
+    }
 
-// 5点消費して一手戻す関数
-function undo() {
-    if (history.length > 0 && score >= UNDO_COST) {
-        score -= UNDO_COST;
-        const lastState = JSON.parse(history.pop());
-        grid = lastState.grid;
-        scoreEl.innerText = score; // 画面のスコア表示を更新
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        initAudio();
+        saveState(); // 操作前に現在の状態を保存
+        const pos = getPos(e);
+        if (pos) {
+            isDragging = true;
+            selectedPath = [pos];
+            draw();
+        }
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        const pos = getPos(e);
+        if (!pos) return;
+
+        const last = selectedPath[selectedPath.length - 1];
+        if (pos.r === last.r && pos.c === last.c) return;
+
+        const color = grid[selectedPath[0].r][selectedPath[0].c];
+        if (grid[pos.r][pos.c] === color && Math.abs(pos.r - last.r) <= 1 && Math.abs(pos.c - last.c) <= 1) {
+            
+            const existingIndex = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
+            if (existingIndex !== -1 && existingIndex !== selectedPath.length - 1) {
+                isLooping = true;
+            } else {
+                isLooping = false;
+            }
+            selectedPath.push(pos);
+            draw();
+        }
+    });
+
+    window.addEventListener('touchend', () => {
+        if (!isDragging) return;
+        isDragging = false;
+
+        if (selectedPath.length >= 2) {
+            const first = selectedPath[0];
+            const last = selectedPath[selectedPath.length - 1];
+            const isActuallyLoop = selectedPath.length >= 4 && first.r === last.r && first.c === last.c;
+            const color = grid[first.r][first.c];
+
+            playClearSound(isActuallyLoop);
+
+            if (isActuallyLoop) {
+                // 四角形消去：同じ色のドットを全て消す
+                for (let r = 0; r < ROWS; r++) {
+                    for (let c = 0; c < COLS; c++) {
+                        if (grid[r][c] === color) {
+                            grid[r][c] = null;
+                            score++;
+                        }
+                    }
+                }
+            } else {
+                // 通常消去
+                selectedPath.forEach(p => {
+                    if (grid[p.r][p.c]) {
+                        grid[p.r][p.c] = null;
+                        score++;
+                    }
+                });
+            }
+            dropDots();
+            scoreEl.innerText = score;
+        }
+        selectedPath = [];
+        isLooping = false;
         draw();
-    } else if (score < UNDO_COST) {
-        // スコアが足りない時の演出
-        scoreEl.style.color = 'red';
-        setTimeout(() => scoreEl.style.color = 'black', 500);
+    });
+
+    function dropDots() {
+        for (let c = 0; c < COLS; c++) {
+            let emptyRows = 0;
+            for (let r = ROWS - 1; r >= 0; r--) {
+                if (grid[r][c] === null) {
+                    emptyRows++;
+                } else if (emptyRows > 0) {
+                    grid[r + emptyRows][c] = grid[r][c];
+                    grid[r][c] = null;
+                }
+            }
+            for (let r = 0; r < emptyRows; r++) {
+                grid[r][c] = COLORS[Math.floor(Math.random() * COLORS.length)];
+            }
+        }
     }
-}
-.
 
-function resetGame() { score = 0; startTime = Date.now(); scoreEl.innerText = score; initGrid(); draw(); }
-window.addEventListener('resize', () => { canvas.width = canvas.height = Math.min(window.innerWidth - 40, 400); draw(); });
-setInterval(() => {
-    const diff = Math.floor((Date.now() - startTime) / 1000);
-    timeEl.innerText = `${Math.floor(diff/60).toString().padStart(2,'0')}:${(diff%60).toString().padStart(2,'0')}`;
-}, 1000);
-
-canvas.width = canvas.height = Math.min(window.innerWidth - 40, 400);
-initGrid();
-draw();
-// Undoボタンを作成して画面に追加
-const undoBtn = document.createElement('button');
-undoBtn.innerHTML = `Undo <span style="font-size: 0.8em; opacity: 0.7;">(-5pts)</span>`;
-undoBtn.style = "margin: 10px; padding: 10px 20px; font-size: 16px; border-radius: 20px; border: 1px solid #ccc; background: white; cursor: pointer;";
-undoBtn.onclick = undo;
-document.body.appendChild(undoBtn);
+    canvas.width = COLS * SPACING;
+    canvas.height = ROWS * SPACING;
+    initGrid();
+    draw();
 
 </script>
 </body>
