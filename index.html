@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Final Sound Edition</title>
+    <title>Dots Game - Perfect Sound Edition</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -52,37 +52,42 @@
         }
     }
 
-    // --- 修正版サウンド関数：音階＋重低音 ---
+    // --- 改良版サウンド：確実に音階を鳴らす ---
     function playClearSound(isLoop, count) {
         if (!audioCtx) return;
         if (audioCtx.state === 'suspended') audioCtx.resume();
 
-        // 1. メインの音階（ドット数に応じて周波数を上げる）
-        // 基本周波数 440Hz (ラ) から、1つ増えるごとに半音ずつ上げる計算
-        const baseFreq = 440;
-        const freq = baseFreq * Math.pow(2, (count - 2) / 12);
+        const now = audioCtx.currentTime;
 
+        // 1. 高音の音階（ドット数が多いほど高くなる）
         const osc1 = audioCtx.createOscillator();
         const gain1 = audioCtx.createGain();
+        
+        // 周波数の計算: ドット2つで440Hz、そこからドットが増えるごとに音を上げる
+        // (count - 2) * 110Hz ずつ足すシンプルな計算に変更
+        const freq = 440 + ((count - 2) * 110);
+        
         osc1.type = 'triangle';
-        osc1.frequency.setValueAtTime(isLoop ? freq * 2 : freq, audioCtx.currentTime);
-        gain1.gain.setValueAtTime(0.2, audioCtx.currentTime);
-        gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+        osc1.frequency.setValueAtTime(isLoop ? freq * 1.5 : freq, now);
+        
+        gain1.gain.setValueAtTime(0.2, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+        
         osc1.connect(gain1).connect(audioCtx.destination);
-        osc1.start();
-        osc1.stop(audioCtx.currentTime + 0.5);
+        osc1.start(now);
+        osc1.stop(now + 0.5);
 
-        // 2. ループ時のみ鳴らす重低音（振動の代わり）
+        // 2. ループ時のみ重低音を重ねる
         if (isLoop) {
             const subOsc = audioCtx.createOscillator();
             const subGain = audioCtx.createGain();
             subOsc.type = 'sine';
-            subOsc.frequency.setValueAtTime(60, audioCtx.currentTime); // 60Hzの深い低音
-            subGain.gain.setValueAtTime(0.5, audioCtx.currentTime);
-            subGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+            subOsc.frequency.setValueAtTime(55, now); // 低いラ
+            subGain.gain.setValueAtTime(0.4, now);
+            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
             subOsc.connect(subGain).connect(audioCtx.destination);
-            subOsc.start();
-            subOsc.stop(audioCtx.currentTime + 0.6);
+            subOsc.start(now);
+            subOsc.stop(now + 0.6);
         }
     }
 
@@ -182,14 +187,18 @@
     window.addEventListener('touchend', () => {
         if (!isDragging) return;
         isDragging = false;
-        if (selectedPath.length >= 2) {
+        
+        // 指を離した瞬間のドット数を記録
+        const count = selectedPath.length;
+
+        if (count >= 2) {
             const first = selectedPath[0];
-            const last = selectedPath[selectedPath.length - 1];
-            const isActuallyLoop = selectedPath.length >= 4 && first.r === last.r && first.c === last.c;
+            const last = selectedPath[count - 1];
+            const isActuallyLoop = count >= 4 && first.r === last.r && first.c === last.c;
             const color = grid[first.r][first.c];
 
-            // 繋いだドット数を渡してサウンド再生
-            playClearSound(isActuallyLoop, selectedPath.length);
+            // 確定したドット数（count）を渡す
+            playClearSound(isActuallyLoop, count);
 
             if (isActuallyLoop) {
                 for (let r = 0; r < ROWS; r++) {
