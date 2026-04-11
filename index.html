@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Perfect Sound Edition</title>
+    <title>Dots Game - Original Sound Restored</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -52,43 +52,24 @@
         }
     }
 
-    // --- 改良版サウンド：確実に音階を鳴らす ---
-    function playClearSound(isLoop, count) {
+    // --- 初期の音質・音階ロジックに完全復元 ---
+    function playTone(index) {
         if (!audioCtx) return;
         if (audioCtx.state === 'suspended') audioCtx.resume();
-
-        const now = audioCtx.currentTime;
-
-        // 1. 高音の音階（ドット数が多いほど高くなる）
-        const osc1 = audioCtx.createOscillator();
-        const gain1 = audioCtx.createGain();
         
-        // 周波数の計算: ドット2つで440Hz、そこからドットが増えるごとに音を上げる
-        // (count - 2) * 110Hz ずつ足すシンプルな計算に変更
-        const freq = 440 + ((count - 2) * 110);
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
         
-        osc1.type = 'triangle';
-        osc1.frequency.setValueAtTime(isLoop ? freq * 1.5 : freq, now);
+        osc.type = 'sine'; // 初期の澄んだ音質
+        // 繋ぐたびに上がる音階
+        osc.frequency.setValueAtTime(440 * Math.pow(1.06, index), audioCtx.currentTime);
         
-        gain1.gain.setValueAtTime(0.2, now);
-        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
         
-        osc1.connect(gain1).connect(audioCtx.destination);
-        osc1.start(now);
-        osc1.stop(now + 0.5);
-
-        // 2. ループ時のみ重低音を重ねる
-        if (isLoop) {
-            const subOsc = audioCtx.createOscillator();
-            const subGain = audioCtx.createGain();
-            subOsc.type = 'sine';
-            subOsc.frequency.setValueAtTime(55, now); // 低いラ
-            subGain.gain.setValueAtTime(0.4, now);
-            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
-            subOsc.connect(subGain).connect(audioCtx.destination);
-            subOsc.start(now);
-            subOsc.stop(now + 0.6);
-        }
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
     }
 
     function initGrid() {
@@ -128,7 +109,7 @@
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
             const color = grid[selectedPath[0].r][selectedPath[0].c];
-            ctx.strokeStyle = isLooping ? 'rgba(255,255,255,0.8)' : color;
+            ctx.strokeStyle = isLooping ? 'white' : color;
             selectedPath.forEach((p, i) => {
                 const x = p.c * SPACING + SPACING / 2;
                 const y = p.r * SPACING + SPACING / 2;
@@ -146,7 +127,7 @@
                     ctx.fillStyle = grid[r][c];
                     ctx.fill();
                     if (selectedPath.some(p => p.r === r && p.c === c)) {
-                        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.stroke();
+                        ctx.lineWidth = 3; ctx.strokeStyle = 'white'; ctx.stroke();
                     }
                 }
             }
@@ -175,11 +156,21 @@
         const pos = getPos(e); if (!pos) return;
         const last = selectedPath[selectedPath.length - 1];
         if (pos.r === last.r && pos.c === last.c) return;
+        
         const color = grid[selectedPath[0].r][selectedPath[0].c];
         if (grid[pos.r][pos.c] === color && Math.abs(pos.r - last.r) <= 1 && Math.abs(pos.c - last.c) <= 1) {
-            const existingIndex = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
-            isLooping = (existingIndex !== -1 && existingIndex !== selectedPath.length - 1);
-            selectedPath.push(pos);
+            const alreadyIdx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
+            if (alreadyIdx === -1) {
+                selectedPath.push(pos);
+                isLooping = false;
+                // 繋ぐたびに音を鳴らす（初期の挙動）
+                playTone(selectedPath.length);
+            } else if (alreadyIdx === 0 && selectedPath.length >= 3) {
+                selectedPath.push(pos);
+                isLooping = true;
+                // ループ完成時も音を鳴らす
+                playTone(selectedPath.length + 5);
+            }
             draw();
         }
     });
@@ -187,18 +178,11 @@
     window.addEventListener('touchend', () => {
         if (!isDragging) return;
         isDragging = false;
-        
-        // 指を離した瞬間のドット数を記録
-        const count = selectedPath.length;
-
-        if (count >= 2) {
+        if (selectedPath.length >= 2) {
             const first = selectedPath[0];
-            const last = selectedPath[count - 1];
-            const isActuallyLoop = count >= 4 && first.r === last.r && first.c === last.c;
+            const last = selectedPath[selectedPath.length - 1];
+            const isActuallyLoop = selectedPath.length >= 4 && first.r === last.r && first.c === last.c;
             const color = grid[first.r][first.c];
-
-            // 確定したドット数（count）を渡す
-            playClearSound(isActuallyLoop, count);
 
             if (isActuallyLoop) {
                 for (let r = 0; r < ROWS; r++) {
