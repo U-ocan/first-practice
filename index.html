@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - With Timer & Auto Shuffle</title>
+    <title>Dots Game - Fixed Auto Shuffle</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -41,7 +41,7 @@
 
     const ROWS = 6;
     const COLS = 6;
-    const DOT_SIZE = 13; // ドットのサイズ調整（59行目付近）
+    const DOT_SIZE = 15;
     const SPACING = 50;
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
 
@@ -121,14 +121,15 @@
                 grid[r][c] = COLORS[Math.floor(Math.random() * COLORS.length)];
             }
         }
-        ensurePossibleMoves(); // 初期配置時にもチェック
+        ensurePossibleMoves();
     }
 
-    // --- 並び替え機能の追加セクション ---
+    // --- 並び替え機能の修正版 ---
     function hasPossibleMoves() {
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
                 const color = grid[r][c];
+                if (!color) continue;
                 const neighbors = [ {r: r+1, c: c}, {r: r-1, c: c}, {r: r, c: c+1}, {r: r, c: c-1} ];
                 for (let n of neighbors) {
                     if (n.r >= 0 && n.r < ROWS && n.c >= 0 && n.c < COLS) {
@@ -141,16 +142,21 @@
     }
 
     function shuffleGrid() {
-        const allColors = grid.flat();
-        for (let i = allColors.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [allColors[i], allColors[j]] = [allColors[j], allColors[allColors[i]]]; // シンプルな入れ替えは行わない
+        // 1次元配列に全色を抽出（nullを除外）
+        let allColors = [];
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c]) allColors.push(grid[r][c]);
+            }
         }
-        // Fisher-Yatesで再シャッフル
+
+        // Fisher-Yates シャッフル
         for (let i = allColors.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [allColors[i], allColors[j]] = [allColors[j], allColors[i]];
         }
+
+        // 盤面に再配置
         let idx = 0;
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
@@ -160,8 +166,10 @@
     }
 
     function ensurePossibleMoves() {
-        while (!hasPossibleMoves()) {
+        let attempts = 0;
+        while (!hasPossibleMoves() && attempts < 100) {
             shuffleGrid();
+            attempts++;
         }
     }
     // -----------------------------------
@@ -287,7 +295,7 @@
                 selectedPath.forEach(p => { if (grid[p.r][p.c]) { grid[p.r][p.c] = null; score++; } });
             }
             dropDots();
-            ensurePossibleMoves(); // ドット補充後に手詰まりチェックを実行
+            ensurePossibleMoves();
             scoreEl.innerText = score;
         }
         selectedPath = []; isLooping = false; draw();
