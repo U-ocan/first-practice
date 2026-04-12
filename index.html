@@ -3,18 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - With Timer</title>
+    <title>Dots Game - With Timer & Auto Shuffle</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
             background: #121212; color: #e0e0e0; font-family: sans-serif; touch-action: none; 
         }
-        /* スコアと時間のレイアウト調整 */
         #info-container { 
             display: flex; gap: 30px; font-size: 24px; margin-bottom: 20px; font-weight: bold; 
         }
         .info-item { min-width: 120px; text-align: center; }
-        
         canvas { background: #1e1e1e; border-radius: 12px; cursor: crosshair; touch-action: none; }
         #controls { margin-top: 25px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
         button { padding: 14px 28px; font-size: 16px; border-radius: 30px; border: 1px solid #444; background: #2c2c2c; color: #fff; cursor: pointer; }
@@ -43,7 +41,7 @@
 
     const ROWS = 6;
     const COLS = 6;
-    const DOT_SIZE = 13;
+    const DOT_SIZE = 13; // ドットのサイズ調整（59行目付近）
     const SPACING = 50;
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
 
@@ -55,11 +53,9 @@
     let history = [];
     const UNDO_COST = 5;
 
-    // --- タイマー用変数 ---
     let startTime;
     let timerInterval = null;
 
-    // --- サウンドセクション ---
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     let audioCtx;
 
@@ -105,9 +101,8 @@
         });
     }
 
-    // --- タイマー制御 ---
     function startTimer() {
-        if (timerInterval) return; // 既に動いていれば何もしない
+        if (timerInterval) return;
         startTime = Date.now();
         timerInterval = setInterval(updateTimer, 1000);
     }
@@ -126,7 +121,50 @@
                 grid[r][c] = COLORS[Math.floor(Math.random() * COLORS.length)];
             }
         }
+        ensurePossibleMoves(); // 初期配置時にもチェック
     }
+
+    // --- 並び替え機能の追加セクション ---
+    function hasPossibleMoves() {
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const color = grid[r][c];
+                const neighbors = [ {r: r+1, c: c}, {r: r-1, c: c}, {r: r, c: c+1}, {r: r, c: c-1} ];
+                for (let n of neighbors) {
+                    if (n.r >= 0 && n.r < ROWS && n.c >= 0 && n.c < COLS) {
+                        if (grid[n.r][n.c] === color) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    function shuffleGrid() {
+        const allColors = grid.flat();
+        for (let i = allColors.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [allColors[i], allColors[j]] = [allColors[j], allColors[allColors[i]]]; // シンプルな入れ替えは行わない
+        }
+        // Fisher-Yatesで再シャッフル
+        for (let i = allColors.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [allColors[i], allColors[j]] = [allColors[j], allColors[i]];
+        }
+        let idx = 0;
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                grid[r][c] = allColors[idx++];
+            }
+        }
+    }
+
+    function ensurePossibleMoves() {
+        while (!hasPossibleMoves()) {
+            shuffleGrid();
+        }
+    }
+    // -----------------------------------
 
     function saveState() {
         const state = { grid: grid.map(row => [...row]), score: score };
@@ -192,7 +230,7 @@
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
         initAudio();
-        startTimer(); // 最初のタッチでタイマー開始
+        startTimer();
         saveState();
         const pos = getPos(e);
         if (pos) { 
@@ -249,6 +287,7 @@
                 selectedPath.forEach(p => { if (grid[p.r][p.c]) { grid[p.r][p.c] = null; score++; } });
             }
             dropDots();
+            ensurePossibleMoves(); // ドット補充後に手詰まりチェックを実行
             scoreEl.innerText = score;
         }
         selectedPath = []; isLooping = false; draw();
