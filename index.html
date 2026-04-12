@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Fixed Loop Detection</title>
+    <title>Dots Game - With Smooth Animation</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -41,7 +41,7 @@
 
     const ROWS = 6;
     const COLS = 6;
-    const DOT_SIZE = 13;
+    const DOT_SIZE = 15;
     const SPACING = 50;
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
 
@@ -50,7 +50,7 @@
     let selectedPath = [];
     let isDragging = false;
     let isLooping = false;
-    let loopStartPos = null; // ループの起点となるドットの位置を保持
+    let loopStartPos = null;
     let history = [];
     const UNDO_COST = 5;
 
@@ -119,21 +119,29 @@
         for (let r = 0; r < ROWS; r++) {
             grid[r] = [];
             for (let c = 0; c < COLS; c++) {
-                grid[r][c] = COLORS[Math.floor(Math.random() * COLORS.length)];
+                grid[r][c] = createDot(r, c, COLORS[Math.floor(Math.random() * COLORS.length)]);
             }
         }
         ensurePossibleMoves();
     }
 
+    function createDot(r, c, color) {
+        return {
+            color: color,
+            visualY: r * SPACING + SPACING / 2,
+            targetY: r * SPACING + SPACING / 2
+        };
+    }
+
     function hasPossibleMoves() {
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
-                const color = grid[r][c];
-                if (!color) continue;
+                const dot = grid[r][c];
+                if (!dot) continue;
                 const neighbors = [ {r: r+1, c: c}, {r: r-1, c: c}, {r: r, c: c+1}, {r: r, c: c-1} ];
                 for (let n of neighbors) {
                     if (n.r >= 0 && n.r < ROWS && n.c >= 0 && n.c < COLS) {
-                        if (grid[n.r][n.c] === color) return true;
+                        if (grid[n.r][n.c] && grid[n.r][n.c].color === dot.color) return true;
                     }
                 }
             }
@@ -145,7 +153,7 @@
         let allColors = [];
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
-                if (grid[r][c]) allColors.push(grid[r][c]);
+                if (grid[r][c]) allColors.push(grid[r][c].color);
             }
         }
         for (let i = allColors.length - 1; i > 0; i--) {
@@ -155,7 +163,7 @@
         let idx = 0;
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
-                grid[r][c] = allColors[idx++];
+                grid[r][c].color = allColors[idx++];
             }
         }
     }
@@ -169,7 +177,7 @@
     }
 
     function saveState() {
-        const state = { grid: grid.map(row => [...row]), score: score };
+        const state = { grid: grid.map(row => row.map(d => ({...d}))), score: score };
         history.push(JSON.stringify(state));
         if (history.length > 20) history.shift();
     }
@@ -181,7 +189,6 @@
             const lastState = JSON.parse(history.pop());
             grid = lastState.grid;
             scoreEl.innerText = score;
-            draw();
         } else if (score < UNDO_COST) {
             scoreEl.style.color = '#FF5252';
             setTimeout(() => scoreEl.style.color = '#e0e0e0', 500);
@@ -190,31 +197,32 @@
 
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // パスの描画
         if (selectedPath.length > 0) {
+            const color = grid[selectedPath[0].r][selectedPath[0].c].color;
             ctx.beginPath();
             ctx.lineWidth = 6;
             ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-            const color = grid[selectedPath[0].r][selectedPath[0].c];
-            ctx.strokeStyle = color; // パス自体はドットの色にする
-
+            ctx.strokeStyle = color;
             selectedPath.forEach((p, i) => {
                 const x = p.c * SPACING + SPACING / 2;
-                const y = p.r * SPACING + SPACING / 2;
+                const dot = grid[p.r][p.c];
+                const y = dot ? dot.visualY : p.r * SPACING + SPACING / 2;
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             });
             ctx.stroke();
 
-            // ループ部分を強調表示（もしあれば）
             if (isLooping && loopStartPos) {
                 ctx.beginPath();
-                ctx.lineWidth = 8;
-                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 8; ctx.strokeStyle = 'white';
                 let startDrawing = false;
                 selectedPath.forEach((p, i) => {
                     if (p.r === loopStartPos.r && p.c === loopStartPos.c) startDrawing = true;
                     if (startDrawing) {
                         const x = p.c * SPACING + SPACING / 2;
-                        const y = p.r * SPACING + SPACING / 2;
+                        const dot = grid[p.r][p.c];
+                        const y = dot ? dot.visualY : p.r * SPACING + SPACING / 2;
                         if (i === selectedPath.findIndex(lp => lp.r === loopStartPos.r && lp.c === loopStartPos.c)) ctx.moveTo(x, y);
                         else ctx.lineTo(x, y);
                     }
@@ -222,22 +230,28 @@
                 ctx.stroke();
             }
         }
+
+        // ドットの描画と座標更新
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
-                if (grid[r][c]) {
+                const dot = grid[r][c];
+                if (dot) {
+                    // アニメーション更新（イージング）
+                    dot.visualY += (dot.targetY - dot.visualY) * 0.15;
+                    
                     const x = c * SPACING + SPACING / 2;
-                    const y = r * SPACING + SPACING / 2;
                     ctx.beginPath();
-                    ctx.arc(x, y, DOT_SIZE, 0, Math.PI * 2);
-                    ctx.fillStyle = grid[r][c];
+                    ctx.arc(x, dot.visualY, DOT_SIZE, 0, Math.PI * 2);
+                    ctx.fillStyle = dot.color;
                     ctx.fill();
-                    // 選択中のドットに枠線
+                    
                     if (selectedPath.some(p => p.r === r && p.c === c)) {
                         ctx.lineWidth = 3; ctx.strokeStyle = 'white'; ctx.stroke();
                     }
                 }
             }
         }
+        requestAnimationFrame(draw);
     }
 
     function getPos(e) {
@@ -255,13 +269,9 @@
         startTimer();
         saveState();
         const pos = getPos(e);
-        if (pos && grid[pos.r][pos.c]) { // ドットが存在する場合のみ開始
-            isDragging = true; 
-            selectedPath = [pos]; 
-            isLooping = false;
-            loopStartPos = null;
+        if (pos && grid[pos.r][pos.c]) {
+            isDragging = true; selectedPath = [pos]; isLooping = false; loopStartPos = null;
             playDotSound(0);
-            draw(); 
         }
     });
 
@@ -271,32 +281,20 @@
         const last = selectedPath[selectedPath.length - 1];
         if (pos.r === last.r && pos.c === last.c) return;
         
-        const color = grid[selectedPath[0].r][selectedPath[0].c];
+        const color = grid[selectedPath[0].r][selectedPath[0].c].color;
         const rDiff = Math.abs(pos.r - last.r);
         const cDiff = Math.abs(pos.c - last.c);
         
-        // 斜め移動禁止（上下左右のみ、距離が1）
-        if (grid[pos.r][pos.c] === color && (rDiff + cDiff === 1)) {
-            // 現在のパス内で、移動先のドットが既に踏まれているかチェック
+        if (grid[pos.r][pos.c] && grid[pos.r][pos.c].color === color && (rDiff + cDiff === 1)) {
             const alreadyIdx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
-            
             if (alreadyIdx === -1) {
-                // まだ踏んでいないドット（直線）
                 selectedPath.push(pos);
-                // 直線状にあったとしても、もし既にループ中ならループ継続
-                if (isLooping) {
-                    playDotSound(selectedPath.length - 1, true); // 特殊音
-                } else {
-                    playDotSound(selectedPath.length - 1); // 通常音
-                }
-                draw();
+                playDotSound(selectedPath.length - 1, isLooping);
             } else if (selectedPath.length >= 3 && alreadyIdx !== selectedPath.length - 2) {
-                // 踏んだことのあるドットで、直前のドットではない（ループ形成）
                 selectedPath.push(pos);
                 isLooping = true;
-                loopStartPos = pos; // このドットをループの起点にする
-                playDotSound(selectedPath.length - 1, true); // 特殊音
-                draw();
+                loopStartPos = pos;
+                playDotSound(selectedPath.length - 1, true);
             }
         }
     });
@@ -305,57 +303,52 @@
         if (!isDragging) return;
         isDragging = false;
         
-        // ループ判定がONで、かつパスが正しく形成されている場合
         if (isLooping && selectedPath.length >= 4 && loopStartPos) {
-            const first = selectedPath[0];
-            const color = grid[first.r][first.c];
-            playClearSound(true); // 消去時の和音（ループ用）
-
-            // 画面上の同じ色のドットを全て消す
+            const color = grid[selectedPath[0].r][selectedPath[0].c].color;
+            playClearSound(true);
             for (let r = 0; r < ROWS; r++) {
                 for (let c = 0; c < COLS; c++) {
-                    if (grid[r][c] === color) {
-                        grid[r][c] = null;
-                        score++;
-                    }
+                    if (grid[r][c] && grid[r][c].color === color) { grid[r][c] = null; score++; }
                 }
             }
-            dropDots();
-            ensurePossibleMoves();
-            scoreEl.innerText = score;
+            dropDots(); ensurePossibleMoves();
         } else if (selectedPath.length >= 2) {
-            // ループではない場合（通常の消去）
-            playClearSound(false); // 消去時の和音（通常用）
-            // 選択されたドットのみ消す（ダブりを防ぐためにSetを使用）
+            playClearSound(false);
             const ptsToRemove = new Set(selectedPath.map(p => `${p.r},${p.c}`));
             ptsToRemove.forEach(pt => {
                 const [r, c] = pt.split(',').map(Number);
-                if (grid[r][c]) {
-                    grid[r][c] = null;
-                    score++;
-                }
+                if (grid[r][c]) { grid[r][c] = null; score++; }
             });
-            dropDots();
-            ensurePossibleMoves();
-            scoreEl.innerText = score;
+            dropDots(); ensurePossibleMoves();
         }
-        
-        selectedPath = []; isLooping = false; loopStartPos = null; draw();
+        scoreEl.innerText = score;
+        selectedPath = []; isLooping = false; loopStartPos = null;
     });
 
     function dropDots() {
         for (let c = 0; c < COLS; c++) {
             let empty = 0;
             for (let r = ROWS - 1; r >= 0; r--) {
-                if (grid[r][c] === null) empty++;
-                else if (empty > 0) { grid[r + empty][c] = grid[r][c]; grid[r][c] = null; }
+                if (grid[r][c] === null) {
+                    empty++;
+                } else if (empty > 0) {
+                    grid[r + empty][c] = grid[r][c];
+                    grid[r + empty][c].targetY = (r + empty) * SPACING + SPACING / 2;
+                    grid[r][c] = null;
+                }
             }
-            for (let r = 0; r < empty; r++) grid[r][c] = COLORS[Math.floor(Math.random() * COLORS.length)];
+            for (let r = 0; r < empty; r++) {
+                const newColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+                grid[r][c] = createDot(r, c, newColor);
+                // 補充されるドットは画面のさらに上から降ってくる演出
+                grid[r][c].visualY = (r - empty) * SPACING; 
+            }
         }
     }
 
     canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
-    initGrid(); draw();
+    initGrid();
+    requestAnimationFrame(draw); // アニメーションループ開始
 </script>
 </body>
 </html>
