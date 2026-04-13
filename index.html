@@ -3,67 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Final Polish</title>
+    <title>Dots Game</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
-            background: #121212; color: #e0e0e0; font-family: sans-serif; touch-action: none; 
+            background: #121212; color: #e0e0e0; font-family: sans-serif;
         }
         #info-container { 
             display: flex; gap: 30px; font-size: 24px; margin-bottom: 20px; font-weight: bold; 
         }
         .info-item { min-width: 120px; text-align: center; }
-        canvas { background: #1e1e1e; border-radius: 12px; cursor: crosshair; touch-action: none; }
-        #controls { margin-top: 25px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
-        #btn-row { display: flex; gap: 15px; }
+        canvas { background: #1e1e1e; border-radius: 12px; cursor: crosshair; touch-action: none; display: block; }
+        #controls { margin-top: 25px; display: flex; gap: 15px; }
         button { padding: 14px 28px; font-size: 16px; border-radius: 30px; border: 1px solid #444; background: #2c2c2c; color: #fff; cursor: pointer; }
         button:active { background: #3d3d3d; }
         #resetBtn { border-color: #FF5252; color: #FF5252; }
         #resetBtn:active { background: #3d1a1a; }
         .cost-label { font-size: 0.8em; color: #aaa; margin-left: 5px; }
-
-```
-    /* 確認ダイアログ */
-    #confirm-overlay {
-        display: none;
-        position: fixed; inset: 0;
-        background: rgba(0,0,0,0.6);
-        align-items: center; justify-content: center;
-        z-index: 100;
-    }
-    #confirm-overlay.show { display: flex; }
-    #confirm-box {
-        background: #2c2c2c;
-        border: 1px solid #555;
-        border-radius: 16px;
-        padding: 28px 32px;
-        text-align: center;
-        width: 260px;
-    }
-    #confirm-box p {
-        margin: 0 0 20px;
-        font-size: 16px;
-        line-height: 1.5;
-        color: #e0e0e0;
-    }
-    #confirm-box .btn-row {
-        display: flex; gap: 12px; justify-content: center;
-    }
-    #confirm-box .btn-cancel {
-        padding: 12px 24px; font-size: 15px;
-        border-radius: 30px; border: 1px solid #555;
-        background: #3a3a3a; color: #ccc; cursor: pointer;
-    }
-    #confirm-box .btn-ok {
-        padding: 12px 24px; font-size: 15px;
-        border-radius: 30px; border: 1px solid #FF5252;
-        background: transparent; color: #FF5252; cursor: pointer;
-    }
-    #confirm-box .btn-ok:active  { background: #3d1a1a; }
-    #confirm-box .btn-cancel:active { background: #444; }
-</style>
-```
-
+    </style>
 </head>
 <body>
 
@@ -75,22 +32,9 @@
 
 <canvas id="gameCanvas"></canvas>
 
-<!-- リセット確認ダイアログ -->
-<div id="confirm-overlay">
-    <div id="confirm-box">
-        <p>スコアとタイマーを<br>リセットしますか？</p>
-        <div class="btn-row">
-            <button class="btn-cancel" id="cancelBtn">キャンセル</button>
-            <button class="btn-ok" id="confirmBtn">リセット</button>
-        </div>
-    </div>
-</div>
-
 <div id="controls">
-    <div id="btn-row">
-        <button onclick="undo()">Undo <span class="cost-label">(-5pts)</span></button>
-        <button id="resetBtn" onclick="resetGame()">Reset</button>
-    </div>
+    <button id="undoBtn">Undo <span class="cost-label">(-5pts)</span></button>
+    <button id="resetBtn">Reset</button>
 </div>
 ```
 
@@ -100,29 +44,27 @@
     const scoreEl = document.getElementById('score');
     const timerEl = document.getElementById('timer');
 
-    const ROWS = 6;
-    const COLS = 6;
-    const DOT_SIZE = 13; 
+    const ROWS = 6, COLS = 6;
+    const DOT_SIZE = 13;
     const SPACING = 50;
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
-
-    const BOUNCE_STRENGTH = 0.15; 
-    const FRICTION = 0.6;        
+    const BOUNCE_STRENGTH = 0.15;
+    const FRICTION = 0.6;
+    const UNDO_COST = 5;
 
     let grid = [];
-    // ★ localStorage からスコアを復元（なければ 0）
     let score = parseInt(localStorage.getItem('dotsGameScore') || '0', 10);
     let selectedPath = [];
     let isDragging = false;
     let isLooping = false;
     let loopStartPos = null;
     let history = [];
-    const UNDO_COST = 5;
+    let startTime, timerInterval = null, elapsedSeconds = 0;
 
-    let startTime;
-    let timerInterval = null;
-    // ★ タイマーの経過秒数（リセット管理用）
-    let elapsedSeconds = 0;
+    // ダイアログ状態
+    let showConfirm = false;
+    let dlgCancelBtn = null; // {x,y,w,h}
+    let dlgOkBtn = null;
 
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     let audioCtx;
@@ -137,18 +79,15 @@
         const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00, 1046.50];
         let freq = scale[Math.min(step, scale.length - 1)];
         if (isSpecial) freq *= 2.0;
-
         const osc = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
+        const gain = audioCtx.createGain();
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-        gainNode.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.01);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-        osc.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.3);
     }
 
     function playClearSound(isLoop = false) {
@@ -156,316 +95,302 @@
         const freqs = isLoop ? [523.25, 659.25, 783.99, 1046.50] : [523.25, 659.25, 783.99];
         freqs.forEach(freq => {
             const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
+            const gain = audioCtx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-            gainNode.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.05);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
-            osc.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.4);
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.4);
         });
     }
 
     function startTimer() {
         if (timerInterval) return;
         startTime = Date.now();
-        timerInterval = setInterval(updateTimer, 1000);
+        timerInterval = setInterval(() => {
+            elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            const m = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
+            const s = (elapsedSeconds % 60).toString().padStart(2, '0');
+            timerEl.innerText = `${m}:${s}`;
+        }, 1000);
     }
 
-    function updateTimer() {
-        elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-        const mins = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
-        const secs = (elapsedSeconds % 60).toString().padStart(2, '0');
-        timerEl.innerText = `${mins}:${secs}`;
-    }
-
-    // ★ スコアを更新して localStorage に保存
-    function updateScore(newScore) {
-        score = newScore;
+    function updateScore(v) {
+        score = v;
         scoreEl.innerText = score;
         localStorage.setItem('dotsGameScore', score);
     }
 
-    // ★ リセットボタン → 確認ダイアログを表示
-    function resetGame() {
-        document.getElementById('confirm-overlay').classList.add('show');
-    }
-
-    function cancelReset() {
-        document.getElementById('confirm-overlay').classList.remove('show');
-    }
-
-    function confirmReset() {
-        document.getElementById('confirm-overlay').classList.remove('show');
-
-        // タイマー停止・リセット
-        if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-        }
-        elapsedSeconds = 0;
-        timerEl.innerText = '00:00';
-
-        // スコアリセット
-        updateScore(0);
-
-        // 履歴・ドラッグ状態リセット
-        history = [];
-        selectedPath = [];
-        isDragging = false;
-        isLooping = false;
-        loopStartPos = null;
-
-        // グリッド再生成
-        grid = [];
-        initGrid();
+    function createDot(r, c, color) {
+        return { color, visualY: r*SPACING + SPACING/2, targetY: r*SPACING + SPACING/2, vy: 0 };
     }
 
     function initGrid() {
         for (let r = 0; r < ROWS; r++) {
             grid[r] = [];
-            for (let c = 0; c < COLS; c++) {
-                grid[r][c] = createDot(r, c, COLORS[Math.floor(Math.random() * COLORS.length)]);
-            }
+            for (let c = 0; c < COLS; c++)
+                grid[r][c] = createDot(r, c, COLORS[Math.floor(Math.random()*COLORS.length)]);
         }
         ensurePossibleMoves();
     }
 
-    function createDot(r, c, color) {
-        return {
-            color: color,
-            visualY: r * SPACING + SPACING / 2,
-            targetY: r * SPACING + SPACING / 2,
-            vy: 0
-        };
-    }
-
     function hasPossibleMoves() {
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                const dot = grid[r][c];
-                if (!dot) continue;
-                const neighbors = [ {r: r+1, c: c}, {r: r-1, c: c}, {r: r, c: c+1}, {r: r, c: c-1} ];
-                for (let n of neighbors) {
-                    if (n.r >= 0 && n.r < ROWS && n.c >= 0 && n.c < COLS) {
-                        if (grid[n.r][n.c] && grid[n.r][n.c].color === dot.color) return true;
-                    }
-                }
+        for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+            const dot = grid[r][c]; if (!dot) continue;
+            for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                const nr=r+dr, nc=c+dc;
+                if (nr>=0&&nr<ROWS&&nc>=0&&nc<COLS&&grid[nr][nc]?.color===dot.color) return true;
             }
         }
         return false;
     }
 
     function shuffleGrid() {
-        let allColors = [];
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                if (grid[r][c]) allColors.push(grid[r][c].color);
-            }
-        }
-        for (let i = allColors.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [allColors[i], allColors[j]] = [allColors[j], allColors[i]];
-        }
-        let idx = 0;
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                grid[r][c].color = allColors[idx++];
-            }
-        }
+        const all = [];
+        for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) if(grid[r][c]) all.push(grid[r][c].color);
+        for (let i=all.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1)); [all[i],all[j]]=[all[j],all[i]]; }
+        let idx=0;
+        for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) grid[r][c].color=all[idx++];
     }
 
     function ensurePossibleMoves() {
-        let attempts = 0;
-        while (!hasPossibleMoves() && attempts < 100) {
-            shuffleGrid();
-            attempts++;
-        }
+        let n=0; while(!hasPossibleMoves()&&n++<100) shuffleGrid();
     }
 
     function saveState() {
-        const state = { grid: grid.map(row => row.map(d => ({...d}))), score: score };
-        history.push(JSON.stringify(state));
-        if (history.length > 20) history.shift();
+        history.push(JSON.stringify({grid:grid.map(row=>row.map(d=>({...d}))),score}));
+        if(history.length>20) history.shift();
     }
 
-    function undo() {
-        initAudio();
-        if (history.length > 0 && score >= UNDO_COST) {
-            updateScore(score - UNDO_COST);
-            const lastState = JSON.parse(history.pop());
-            grid = lastState.grid;
-        } else if (score < UNDO_COST) {
-            scoreEl.style.color = '#FF5252';
-            setTimeout(() => scoreEl.style.color = '#e0e0e0', 500);
+    function dropDots() {
+        for (let c=0;c<COLS;c++) {
+            let empty=0;
+            for (let r=ROWS-1;r>=0;r--) {
+                if(!grid[r][c]){empty++;}
+                else if(empty>0){
+                    grid[r+empty][c]=grid[r][c];
+                    grid[r+empty][c].targetY=(r+empty)*SPACING+SPACING/2;
+                    grid[r][c]=null;
+                }
+            }
+            for (let r=0;r<empty;r++) {
+                grid[r][c]=createDot(r,c,COLORS[Math.floor(Math.random()*COLORS.length)]);
+                grid[r][c].visualY=(r-empty)*SPACING-50;
+                grid[r][c].vy=15;
+            }
         }
     }
 
+    // ---- Canvas上のダイアログ描画 ----
+    function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x+r, y);
+        ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
+        ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+        ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
+        ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
+        ctx.closePath();
+    }
+
+    function drawConfirmDialog() {
+        const cx = canvas.width/2, cy = canvas.height/2;
+        const dw = 220, dh = 130;
+        const dx = cx-dw/2, dy = cy-dh/2;
+
+        // 背景暗幕
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // ボックス
+        ctx.fillStyle = '#2c2c2c';
+        roundRect(dx, dy, dw, dh, 14); ctx.fill();
+        ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
+        roundRect(dx, dy, dw, dh, 14); ctx.stroke();
+
+        // テキスト
+        ctx.fillStyle = '#e0e0e0';
+        ctx.textAlign = 'center';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('スコアとタイマーを', cx, cy - 26);
+        ctx.fillText('リセットしますか？', cx, cy - 8);
+
+        // ボタン
+        const bw=88, bh=34, gap=12;
+        const totalBW = bw*2+gap;
+        const cancelX = cx - totalBW/2;
+        const okX = cancelX + bw + gap;
+        const btnY = cy + 14;
+
+        dlgCancelBtn = {x:cancelX, y:btnY, w:bw, h:bh};
+        dlgOkBtn     = {x:okX,     y:btnY, w:bw, h:bh};
+
+        // キャンセル
+        ctx.fillStyle = '#3a3a3a';
+        roundRect(cancelX, btnY, bw, bh, 17); ctx.fill();
+        ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
+        roundRect(cancelX, btnY, bw, bh, 17); ctx.stroke();
+        ctx.fillStyle = '#ccc'; ctx.font = '13px sans-serif';
+        ctx.fillText('キャンセル', cancelX+bw/2, btnY+22);
+
+        // リセット
+        ctx.fillStyle = '#1a0a0a';
+        roundRect(okX, btnY, bw, bh, 17); ctx.fill();
+        ctx.strokeStyle = '#FF5252'; ctx.lineWidth = 1;
+        roundRect(okX, btnY, bw, bh, 17); ctx.stroke();
+        ctx.fillStyle = '#FF5252'; ctx.font = '13px sans-serif';
+        ctx.fillText('リセット', okX+bw/2, btnY+22);
+    }
+
+    function hitBtn(btn, x, y) {
+        return btn && x>=btn.x && x<=btn.x+btn.w && y>=btn.y && y<=btn.y+btn.h;
+    }
+
+    // ---- 描画ループ ----
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
+
         if (selectedPath.length > 0) {
             const color = grid[selectedPath[0].r][selectedPath[0].c].color;
             ctx.beginPath();
-            ctx.lineWidth = 6; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-            ctx.strokeStyle = color;
-            selectedPath.forEach((p, i) => {
-                const x = p.c * SPACING + SPACING / 2;
-                const dot = grid[p.r][p.c];
-                const y = dot ? dot.visualY : p.r * SPACING + SPACING / 2;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            ctx.lineWidth=6; ctx.lineJoin='round'; ctx.lineCap='round';
+            ctx.strokeStyle=color;
+            selectedPath.forEach((p,i) => {
+                const x=p.c*SPACING+SPACING/2;
+                const y=grid[p.r][p.c]?.visualY ?? p.r*SPACING+SPACING/2;
+                i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
             });
             ctx.stroke();
+        }
 
-            if (isLooping && loopStartPos) {
-                ctx.beginPath();
-                ctx.lineWidth = 8; ctx.strokeStyle = 'white';
-                let startDrawing = false;
-                selectedPath.forEach((p, i) => {
-                    if (p.r === loopStartPos.r && p.c === loopStartPos.c) startDrawing = true;
-                    if (startDrawing) {
-                        const x = p.c * SPACING + SPACING / 2;
-                        const dot = grid[p.r][p.c];
-                        const y = dot ? dot.visualY : p.r * SPACING + SPACING / 2;
-                        if (i === selectedPath.findIndex(lp => lp.r === loopStartPos.r && lp.c === loopStartPos.c)) ctx.moveTo(x, y);
-                        else ctx.lineTo(x, y);
-                    }
-                });
-                ctx.stroke();
+        for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
+            const dot=grid[r][c]; if(!dot) continue;
+            dot.vy += (dot.targetY-dot.visualY)*BOUNCE_STRENGTH;
+            dot.vy *= FRICTION;
+            dot.visualY += dot.vy;
+            const x=c*SPACING+SPACING/2;
+            ctx.beginPath();
+            ctx.arc(x, dot.visualY, DOT_SIZE, 0, Math.PI*2);
+            ctx.fillStyle=dot.color; ctx.fill();
+            if (selectedPath.some(p=>p.r===r&&p.c===c)) {
+                ctx.lineWidth=3; ctx.strokeStyle='white'; ctx.stroke();
             }
         }
 
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                const dot = grid[r][c];
-                if (dot) {
-                    let ay = (dot.targetY - dot.visualY) * BOUNCE_STRENGTH;
-                    dot.vy += ay;
-                    dot.vy *= FRICTION;
-                    dot.visualY += dot.vy;
-                    
-                    const x = c * SPACING + SPACING / 2;
-                    ctx.beginPath();
-                    ctx.arc(x, dot.visualY, DOT_SIZE, 0, Math.PI * 2);
-                    ctx.fillStyle = dot.color;
-                    ctx.fill();
-                    
-                    if (selectedPath.some(p => p.r === r && p.c === c)) {
-                        ctx.lineWidth = 3; ctx.strokeStyle = 'white'; ctx.stroke();
-                    }
-                }
-            }
-        }
+        if (showConfirm) drawConfirmDialog();
+
         requestAnimationFrame(draw);
     }
 
-    function getPos(e) {
+    // ---- 座標取得 ----
+    function getCanvasXY(e) {
         const rect = canvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const c = Math.floor((clientX - rect.left) / SPACING);
-        const r = Math.floor((clientY - rect.top) / SPACING);
-        return (r >= 0 && r < ROWS && c >= 0 && c < COLS) ? {r, c} : null;
+        const t = e.touches?.[0] ?? e.changedTouches?.[0] ?? e;
+        return { x: t.clientX - rect.left, y: t.clientY - rect.top };
     }
 
+    function getGridPos(x, y) {
+        const c=Math.floor(x/SPACING), r=Math.floor(y/SPACING);
+        return (r>=0&&r<ROWS&&c>=0&&c<COLS) ? {r,c} : null;
+    }
+
+    // ---- タッチイベント（canvasに集約） ----
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
+        const {x, y} = getCanvasXY(e);
+
+        if (showConfirm) {
+            if (hitBtn(dlgCancelBtn, x, y)) { showConfirm = false; }
+            else if (hitBtn(dlgOkBtn, x, y)) { showConfirm = false; execReset(); }
+            return;
+        }
+
         initAudio();
         startTimer();
         saveState();
-        const pos = getPos(e);
+        const pos = getGridPos(x, y);
         if (pos && grid[pos.r][pos.c]) {
-            isDragging = true; selectedPath = [pos]; isLooping = false; loopStartPos = null;
+            isDragging=true; selectedPath=[pos]; isLooping=false; loopStartPos=null;
             playDotSound(0);
         }
-    });
+    }, {passive: false});
 
     canvas.addEventListener('touchmove', (e) => {
-        if (!isDragging) return;
-        const pos = getPos(e); if (!pos) return;
-        const last = selectedPath[selectedPath.length - 1];
-        if (pos.r === last.r && pos.c === last.c) return;
-        
+        e.preventDefault();
+        if (showConfirm || !isDragging) return;
+        const {x, y} = getCanvasXY(e);
+        const pos = getGridPos(x, y); if (!pos) return;
+        const last = selectedPath[selectedPath.length-1];
+        if (pos.r===last.r && pos.c===last.c) return;
+
         const color = grid[selectedPath[0].r][selectedPath[0].c].color;
-        const rDiff = Math.abs(pos.r - last.r);
-        const cDiff = Math.abs(pos.c - last.c);
-        
-        if (grid[pos.r][pos.c] && grid[pos.r][pos.c].color === color && (rDiff + cDiff === 1)) {
-            const alreadyIdx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
-            if (alreadyIdx === -1) {
+        if (grid[pos.r][pos.c]?.color===color && Math.abs(pos.r-last.r)+Math.abs(pos.c-last.c)===1) {
+            const idx = selectedPath.findIndex(p=>p.r===pos.r&&p.c===pos.c);
+            if (idx===-1) {
                 selectedPath.push(pos);
-                playDotSound(selectedPath.length - 1, isLooping);
-            } else if (selectedPath.length >= 3 && alreadyIdx !== selectedPath.length - 2) {
+                playDotSound(selectedPath.length-1, isLooping);
+            } else if (selectedPath.length>=3 && idx!==selectedPath.length-2) {
                 selectedPath.push(pos);
-                isLooping = true;
-                loopStartPos = pos;
-                playDotSound(selectedPath.length - 1, true);
+                isLooping=true; loopStartPos=pos;
+                playDotSound(selectedPath.length-1, true);
             }
         }
-    });
+    }, {passive: false});
 
-    window.addEventListener('touchend', () => {
-        if (!isDragging) return;
-        isDragging = false;
-        
-        if (isLooping && selectedPath.length >= 4 && loopStartPos) {
-            const color = grid[selectedPath[0].r][selectedPath[0].c].color;
+    canvas.addEventListener('touchend', (e) => {
+        if (showConfirm || !isDragging) return;
+        isDragging=false;
+
+        if (isLooping && selectedPath.length>=4 && loopStartPos) {
+            const color=grid[selectedPath[0].r][selectedPath[0].c].color;
             playClearSound(true);
-            for (let r = 0; r < ROWS; r++) {
-                for (let c = 0; c < COLS; c++) {
-                    if (grid[r][c] && grid[r][c].color === color) { grid[r][c] = null; score++; }
-                }
-            }
+            for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++)
+                if(grid[r][c]?.color===color){grid[r][c]=null;score++;}
             dropDots(); ensurePossibleMoves();
-        } else if (selectedPath.length >= 2) {
+        } else if (selectedPath.length>=2) {
             playClearSound(false);
-            const ptsToRemove = new Set(selectedPath.map(p => `${p.r},${p.c}`));
-            ptsToRemove.forEach(pt => {
-                const [r, c] = pt.split(',').map(Number);
-                if (grid[r][c]) { grid[r][c] = null; score++; }
+            new Set(selectedPath.map(p=>`${p.r},${p.c}`)).forEach(pt=>{
+                const [r,c]=pt.split(',').map(Number);
+                if(grid[r][c]){grid[r][c]=null;score++;}
             });
             dropDots(); ensurePossibleMoves();
         }
-        // ★ updateScore() 経由で localStorage にも保存
         updateScore(score);
-        selectedPath = []; isLooping = false; loopStartPos = null;
+        selectedPath=[]; isLooping=false; loopStartPos=null;
+    }, {passive: false});
+
+    // ---- HTMLボタン ----
+    document.getElementById('undoBtn').addEventListener('click', () => {
+        initAudio();
+        if (history.length>0 && score>=UNDO_COST) {
+            updateScore(score-UNDO_COST);
+            grid = JSON.parse(history.pop()).grid;
+        } else if (score<UNDO_COST) {
+            scoreEl.style.color='#FF5252';
+            setTimeout(()=>scoreEl.style.color='#e0e0e0', 500);
+        }
     });
 
-    function dropDots() {
-        for (let c = 0; c < COLS; c++) {
-            let empty = 0;
-            for (let r = ROWS - 1; r >= 0; r--) {
-                if (grid[r][c] === null) {
-                    empty++;
-                } else if (empty > 0) {
-                    grid[r + empty][c] = grid[r][c];
-                    grid[r + empty][c].targetY = (r + empty) * SPACING + SPACING / 2;
-                    grid[r][c] = null;
-                }
-            }
-            for (let r = 0; r < empty; r++) {
-                const newColor = COLORS[Math.floor(Math.random() * COLORS.length)];
-                grid[r][c] = createDot(r, c, newColor);
-                grid[r][c].visualY = (r - empty) * SPACING - 50; 
-                grid[r][c].vy = 15; 
-            }
-        }
+    document.getElementById('resetBtn').addEventListener('click', () => {
+        showConfirm = true;
+    });
+
+    function execReset() {
+        if(timerInterval){clearInterval(timerInterval);timerInterval=null;}
+        elapsedSeconds=0; timerEl.innerText='00:00';
+        updateScore(0);
+        history=[]; selectedPath=[]; isDragging=false; isLooping=false; loopStartPos=null;
+        grid=[];
+        initGrid();
     }
 
-    canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
+    // ---- 起動 ----
+    canvas.width  = COLS * SPACING;
+    canvas.height = ROWS * SPACING;
     initGrid();
-    // ★ 復元したスコアを画面に反映
     scoreEl.innerText = score;
     requestAnimationFrame(draw);
-
-    // ★ ダイアログボタン：touch-action:none の影響を避けるため touchend + click 両対応
-    document.getElementById('cancelBtn').addEventListener('touchend', (e) => { e.preventDefault(); cancelReset(); });
-    document.getElementById('cancelBtn').addEventListener('click', cancelReset);
-    document.getElementById('confirmBtn').addEventListener('touchend', (e) => { e.preventDefault(); confirmReset(); });
-    document.getElementById('confirmBtn').addEventListener('click', confirmReset);
 </script>
 
 </body>
