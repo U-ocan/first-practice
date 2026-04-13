@@ -81,8 +81,8 @@
     <div id="confirm-box">
         <p>スコアとタイマーを<br>リセットしますか？</p>
         <div class="btn-row">
-            <button class="btn-cancel" onclick="cancelReset()">キャンセル</button>
-            <button class="btn-ok" onclick="confirmReset()">リセット</button>
+            <button class="btn-cancel" id="cancelBtn">キャンセル</button>
+            <button class="btn-ok" id="confirmBtn">リセット</button>
         </div>
     </div>
 </div>
@@ -461,6 +461,12 @@
     // ★ 復元したスコアを画面に反映
     scoreEl.innerText = score;
     requestAnimationFrame(draw);
+
+    // ★ ダイアログボタン：touch-action:none の影響を避けるため touchend + click 両対応
+    document.getElementById('cancelBtn').addEventListener('touchend', (e) => { e.preventDefault(); cancelReset(); });
+    document.getElementById('cancelBtn').addEventListener('click', cancelReset);
+    document.getElementById('confirmBtn').addEventListener('touchend', (e) => { e.preventDefault(); confirmReset(); });
+    document.getElementById('confirmBtn').addEventListener('click', confirmReset);
 </script>
 
 </body>
