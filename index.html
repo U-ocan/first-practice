@@ -22,7 +22,49 @@
         #resetBtn { border-color: #FF5252; color: #FF5252; }
         #resetBtn:active { background: #3d1a1a; }
         .cost-label { font-size: 0.8em; color: #aaa; margin-left: 5px; }
-    </style>
+
+```
+    /* 確認ダイアログ */
+    #confirm-overlay {
+        display: none;
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.6);
+        align-items: center; justify-content: center;
+        z-index: 100;
+    }
+    #confirm-overlay.show { display: flex; }
+    #confirm-box {
+        background: #2c2c2c;
+        border: 1px solid #555;
+        border-radius: 16px;
+        padding: 28px 32px;
+        text-align: center;
+        width: 260px;
+    }
+    #confirm-box p {
+        margin: 0 0 20px;
+        font-size: 16px;
+        line-height: 1.5;
+        color: #e0e0e0;
+    }
+    #confirm-box .btn-row {
+        display: flex; gap: 12px; justify-content: center;
+    }
+    #confirm-box .btn-cancel {
+        padding: 12px 24px; font-size: 15px;
+        border-radius: 30px; border: 1px solid #555;
+        background: #3a3a3a; color: #ccc; cursor: pointer;
+    }
+    #confirm-box .btn-ok {
+        padding: 12px 24px; font-size: 15px;
+        border-radius: 30px; border: 1px solid #FF5252;
+        background: transparent; color: #FF5252; cursor: pointer;
+    }
+    #confirm-box .btn-ok:active  { background: #3d1a1a; }
+    #confirm-box .btn-cancel:active { background: #444; }
+</style>
+```
+
 </head>
 <body>
 
@@ -33,6 +75,17 @@
 </div>
 
 <canvas id="gameCanvas"></canvas>
+
+<!-- リセット確認ダイアログ -->
+<div id="confirm-overlay">
+    <div id="confirm-box">
+        <p>スコアとタイマーを<br>リセットしますか？</p>
+        <div class="btn-row">
+            <button class="btn-cancel" onclick="cancelReset()">キャンセル</button>
+            <button class="btn-ok" onclick="confirmReset()">リセット</button>
+        </div>
+    </div>
+</div>
 
 <div id="controls">
     <div id="btn-row">
@@ -137,8 +190,18 @@
         localStorage.setItem('dotsGameScore', score);
     }
 
-    // ★ リセット処理
+    // ★ リセットボタン → 確認ダイアログを表示
     function resetGame() {
+        document.getElementById('confirm-overlay').classList.add('show');
+    }
+
+    function cancelReset() {
+        document.getElementById('confirm-overlay').classList.remove('show');
+    }
+
+    function confirmReset() {
+        document.getElementById('confirm-overlay').classList.remove('show');
+
         // タイマー停止・リセット
         if (timerInterval) {
             clearInterval(timerInterval);
