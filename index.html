@@ -1,9 +1,10 @@
 <!DOCTYPE html>
+
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Final Adjusted</title>
+    <title>Dots Game - Final Polish</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -15,23 +16,31 @@
         .info-item { min-width: 120px; text-align: center; }
         canvas { background: #1e1e1e; border-radius: 12px; cursor: crosshair; touch-action: none; }
         #controls { margin-top: 25px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        #btn-row { display: flex; gap: 15px; }
         button { padding: 14px 28px; font-size: 16px; border-radius: 30px; border: 1px solid #444; background: #2c2c2c; color: #fff; cursor: pointer; }
         button:active { background: #3d3d3d; }
+        #resetBtn { border-color: #FF5252; color: #FF5252; }
+        #resetBtn:active { background: #3d1a1a; }
         .cost-label { font-size: 0.8em; color: #aaa; margin-left: 5px; }
     </style>
 </head>
 <body>
 
-    <div id="info-container">
-        <div class="info-item">Score: <span id="score">0</span></div>
-        <div class="info-item">Time: <span id="timer">00:00</span></div>
-    </div>
-    
-    <canvas id="gameCanvas"></canvas>
-    
-    <div id="controls">
+```
+<div id="info-container">
+    <div class="info-item">Score: <span id="score">0</span></div>
+    <div class="info-item">Time: <span id="timer">00:00</span></div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="controls">
+    <div id="btn-row">
         <button onclick="undo()">Undo <span class="cost-label">(-5pts)</span></button>
+        <button id="resetBtn" onclick="resetGame()">Reset</button>
     </div>
+</div>
+```
 
 <script>
     const canvas = document.getElementById('gameCanvas');
@@ -41,16 +50,16 @@
 
     const ROWS = 6;
     const COLS = 6;
-    const DOT_SIZE = 13; // ご指定のサイズ：13
+    const DOT_SIZE = 13; 
     const SPACING = 50;
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
 
-    // ご指定のアニメーション設定
     const BOUNCE_STRENGTH = 0.15; 
     const FRICTION = 0.6;        
 
     let grid = [];
-    let score = 0;
+    // ★ localStorage からスコアを復元（なければ 0）
+    let score = parseInt(localStorage.getItem('dotsGameScore') || '0', 10);
     let selectedPath = [];
     let isDragging = false;
     let isLooping = false;
@@ -60,6 +69,8 @@
 
     let startTime;
     let timerInterval = null;
+    // ★ タイマーの経過秒数（リセット管理用）
+    let elapsedSeconds = 0;
 
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     let audioCtx;
@@ -113,10 +124,42 @@
     }
 
     function updateTimer() {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-        const secs = (elapsed % 60).toString().padStart(2, '0');
+        elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+        const mins = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
+        const secs = (elapsedSeconds % 60).toString().padStart(2, '0');
         timerEl.innerText = `${mins}:${secs}`;
+    }
+
+    // ★ スコアを更新して localStorage に保存
+    function updateScore(newScore) {
+        score = newScore;
+        scoreEl.innerText = score;
+        localStorage.setItem('dotsGameScore', score);
+    }
+
+    // ★ リセット処理
+    function resetGame() {
+        // タイマー停止・リセット
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+        elapsedSeconds = 0;
+        timerEl.innerText = '00:00';
+
+        // スコアリセット
+        updateScore(0);
+
+        // 履歴・ドラッグ状態リセット
+        history = [];
+        selectedPath = [];
+        isDragging = false;
+        isLooping = false;
+        loopStartPos = null;
+
+        // グリッド再生成
+        grid = [];
+        initGrid();
     }
 
     function initGrid() {
@@ -190,10 +233,9 @@
     function undo() {
         initAudio();
         if (history.length > 0 && score >= UNDO_COST) {
-            score -= UNDO_COST;
+            updateScore(score - UNDO_COST);
             const lastState = JSON.parse(history.pop());
             grid = lastState.grid;
-            scoreEl.innerText = score;
         } else if (score < UNDO_COST) {
             scoreEl.style.color = '#FF5252';
             setTimeout(() => scoreEl.style.color = '#e0e0e0', 500);
@@ -325,7 +367,8 @@
             });
             dropDots(); ensurePossibleMoves();
         }
-        scoreEl.innerText = score;
+        // ★ updateScore() 経由で localStorage にも保存
+        updateScore(score);
         selectedPath = []; isLooping = false; loopStartPos = null;
     });
 
@@ -352,7 +395,10 @@
 
     canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
     initGrid();
+    // ★ 復元したスコアを画面に反映
+    scoreEl.innerText = score;
     requestAnimationFrame(draw);
 </script>
+
 </body>
 </html>
