@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Spin Shuffle</title>
+    <title>Dots Game - Audio Fixed</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -59,22 +59,25 @@
     let history = [];
     let startTime, timerInterval = null, elapsedSeconds = 0;
 
-    // 演出・状態
     let showConfirm = false;
     let isShuffling = false;
     let shuffleScale = 1.0;
     let shuffleRotation = 0;
     let dlgCancelBtn = null, dlgOkBtn = null;
 
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    let audioCtx;
+    let audioCtx = null;
 
     function initAudio() {
-        if (!audioCtx) audioCtx = new AudioContext();
-        if (audioCtx.state === 'suspended') audioCtx.resume();
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
     }
 
     function playDotSound(step, isSpecial = false) {
+        initAudio();
         if (!audioCtx) return;
         const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00, 1046.50];
         let freq = scale[Math.min(step, scale.length - 1)];
@@ -91,6 +94,7 @@
     }
 
     function playClearSound(isLoop = false) {
+        initAudio();
         if (!audioCtx) return;
         const freqs = isLoop ? [523.25, 659.25, 783.99, 1046.50] : [523.25, 659.25, 783.99];
         freqs.forEach(freq => {
@@ -107,6 +111,7 @@
     }
 
     function playShuffleSound() {
+        initAudio();
         if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -182,7 +187,6 @@
     function startShuffleAnimation() {
         isShuffling = true;
         playShuffleSound();
-        // フェードアウト
         let duration = 30;
         let frame = 0;
         const outInt = setInterval(() => {
@@ -193,7 +197,6 @@
                 clearInterval(outInt);
                 shuffleGrid();
                 while(!hasPossibleMoves()) shuffleGrid();
-                // フェードイン
                 frame = 0;
                 const inInt = setInterval(() => {
                     frame++;
@@ -324,6 +327,7 @@
 
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
+        initAudio(); // 最初の接触で必ず初期化
         if (isShuffling) return;
         const {x, y} = getCanvasXY(e);
         if (showConfirm) {
@@ -331,7 +335,7 @@
             else if (hitBtn(dlgOkBtn, x, y)) { showConfirm = false; execReset(); }
             return;
         }
-        initAudio(); startTimer(); saveState();
+        startTimer(); saveState();
         const pos = getGridPos(x, y);
         if (pos && grid[pos.r][pos.c]) {
             isDragging=true; selectedPath=[pos]; isLooping=false; loopStartPos=null;
@@ -382,7 +386,7 @@
     }, {passive: false});
 
     document.getElementById('undoBtn').addEventListener('click', () => {
-        initAudio();
+        initAudio(); // ボタンクリックでも再開
         if (isShuffling) return;
         if (history.length>0 && score>=UNDO_COST) {
             updateScore(score-UNDO_COST);
@@ -392,7 +396,10 @@
         }
     });
 
-    document.getElementById('resetBtn').addEventListener('click', () => { if(!isShuffling) showConfirm = true; });
+    document.getElementById('resetBtn').addEventListener('click', () => { 
+        initAudio(); // ボタンクリックでも再開
+        if(!isShuffling) showConfirm = true; 
+    });
 
     function execReset() {
         if(timerInterval){clearInterval(timerInterval);timerInterval=null;}
