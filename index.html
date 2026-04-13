@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - With Smooth Animation</title>
+    <title>Dots Game - Final Adjusted</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -41,9 +41,13 @@
 
     const ROWS = 6;
     const COLS = 6;
-    const DOT_SIZE = 15;
+    const DOT_SIZE = 13; // ご指定のサイズ：13
     const SPACING = 50;
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
+
+    // ご指定のアニメーション設定
+    const BOUNCE_STRENGTH = 0.15; 
+    const FRICTION = 0.7;        
 
     let grid = [];
     let score = 0;
@@ -129,7 +133,8 @@
         return {
             color: color,
             visualY: r * SPACING + SPACING / 2,
-            targetY: r * SPACING + SPACING / 2
+            targetY: r * SPACING + SPACING / 2,
+            vy: 0
         };
     }
 
@@ -198,12 +203,10 @@
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        // パスの描画
         if (selectedPath.length > 0) {
             const color = grid[selectedPath[0].r][selectedPath[0].c].color;
             ctx.beginPath();
-            ctx.lineWidth = 6;
-            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            ctx.lineWidth = 6; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
             ctx.strokeStyle = color;
             selectedPath.forEach((p, i) => {
                 const x = p.c * SPACING + SPACING / 2;
@@ -231,13 +234,14 @@
             }
         }
 
-        // ドットの描画と座標更新
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
                 const dot = grid[r][c];
                 if (dot) {
-                    // アニメーション更新（イージング）
-                    dot.visualY += (dot.targetY - dot.visualY) * 0.15;
+                    let ay = (dot.targetY - dot.visualY) * BOUNCE_STRENGTH;
+                    dot.vy += ay;
+                    dot.vy *= FRICTION;
+                    dot.visualY += dot.vy;
                     
                     const x = c * SPACING + SPACING / 2;
                     ctx.beginPath();
@@ -340,15 +344,15 @@
             for (let r = 0; r < empty; r++) {
                 const newColor = COLORS[Math.floor(Math.random() * COLORS.length)];
                 grid[r][c] = createDot(r, c, newColor);
-                // 補充されるドットは画面のさらに上から降ってくる演出
-                grid[r][c].visualY = (r - empty) * SPACING; 
+                grid[r][c].visualY = (r - empty) * SPACING - 50; 
+                grid[r][c].vy = 15; 
             }
         }
     }
 
     canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
     initGrid();
-    requestAnimationFrame(draw); // アニメーションループ開始
+    requestAnimationFrame(draw);
 </script>
 </body>
 </html>
