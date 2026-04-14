@@ -67,38 +67,19 @@
     let dlgCancelBtn = null, dlgOkBtn = null;
 
     let audioCtx = null;
-    let audioUnlocked = false; // ★ アンロック済みフラグ
 
-    // ★ 修正箇所: ダミーバッファ再生でiOSのAudioContextを確実にアンロック
     function initAudio() {
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
-        if (audioUnlocked) return; // 既にアンロック済みなら何もしない
-
-        // suspendedでもrunningでも、初回だけダミーバッファを再生してアンロック
-        const resume = () => {
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-            // 長さゼロのダミーバッファを再生 → iOSがAudioContextを「ユーザー起因」と認識する
-            const buf = audioCtx.createBuffer(1, 1, 22050);
-            const src = audioCtx.createBufferSource();
-            src.buffer = buf;
-            src.connect(audioCtx.destination);
-            src.start(0);
-            audioUnlocked = true;
-        };
-
         if (audioCtx.state === 'suspended') {
-            audioCtx.resume().then(resume);
-        } else {
-            resume();
+            audioCtx.resume();
         }
     }
 
     function playDotSound(step, isSpecial = false) {
-        if (!audioCtx || !audioUnlocked) return;
+        initAudio();
+        if (!audioCtx) return;
         const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00, 1046.50];
         let freq = scale[Math.min(step, scale.length - 1)];
         if (isSpecial) freq *= 2.0;
@@ -114,7 +95,8 @@
     }
 
     function playClearSound(isLoop = false) {
-        if (!audioCtx || !audioUnlocked) return;
+        initAudio();
+        if (!audioCtx) return;
         const freqs = isLoop ? [523.25, 659.25, 783.99, 1046.50] : [523.25, 659.25, 783.99];
         freqs.forEach(freq => {
             const osc = audioCtx.createOscillator();
@@ -130,7 +112,8 @@
     }
 
     function playShuffleSound() {
-        if (!audioCtx || !audioUnlocked) return;
+        initAudio();
+        if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = 'triangle';
@@ -345,7 +328,7 @@
 
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        initAudio(); // ★ 最初のタッチで即アンロック（ダミーバッファ再生）
+        initAudio();
         if (isShuffling) return;
         const {x, y} = getCanvasXY(e);
         if (showConfirm) {
@@ -368,17 +351,31 @@
         const pos = getGridPos(x, y); if (!pos) return;
         const last = selectedPath[selectedPath.length-1];
         if (pos.r===last.r && pos.c===last.c) return;
+
         const color = grid[selectedPath[0].r][selectedPath[0].c].color;
-        if (grid[pos.r][pos.c]?.color===color && Math.abs(pos.r-last.r)+Math.abs(pos.c-last.c)===1) {
-            const idx = selectedPath.findIndex(p=>p.r===pos.r&&p.c===pos.c);
-            if (idx===-1) {
-                selectedPath.push(pos);
-                playDotSound(selectedPath.length-1, isLooping);
-            } else if (selectedPath.length>=3 && idx!==selectedPath.length-2) {
-                selectedPath.push(pos);
-                isLooping=true; loopStartPos=pos;
-                playDotSound(selectedPath.length-1, true);
-            }
+
+        // 隣接チェック（斜め移動は無効）
+        if (Math.abs(pos.r-last.r)+Math.abs(pos.c-last.c) !== 1) return;
+        // 同色チェック
+        if (grid[pos.r][pos.c]?.color !== color) return;
+
+        const idx = selectedPath.findIndex(p => p.r===pos.r && p.c===pos.c);
+
+        if (idx === -1) {
+            // 新規ドット → パスに追加
+            selectedPath.push(pos);
+            playDotSound(selectedPath.length-1, isLooping);
+        } else if (idx === selectedPath.length - 2) {
+            // ★ 一つ前のドットに戻った → 末尾を削除（後退）
+            selectedPath.pop();
+            isLooping = false;
+            loopStartPos = null;
+        } else if (selectedPath.length >= 3) {
+            // ループ形成（先頭ドットに戻ってきた場合など）
+            selectedPath.push(pos);
+            isLooping = true;
+            loopStartPos = pos;
+            playDotSound(selectedPath.length-1, true);
         }
     }, {passive: false});
 
