@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Bonus System</title>
+    <title>Dots Game - Fixed Version</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -20,7 +20,6 @@
         #resetBtn { border-color: #FF5252; color: #FF5252; }
         #resetBtn:active { background: #3d1a1a; }
         .cost-label { font-size: 0.8em; color: #aaa; margin-left: 5px; }
-        /* ボーナス通知の簡易表示（おまけ） */
         #bonus-msg { position: absolute; top: 100px; color: #FFEB3B; font-weight: bold; pointer-events: none; opacity: 0; transition: 0.3s; }
     </style>
 </head>
@@ -53,28 +52,20 @@
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
     const BOUNCE_STRENGTH = 0.15;
     const FRICTION = 0.6;
-    const UNDO_COST = 5;
 
     let grid = [];
     let score = parseInt(localStorage.getItem('dotsGameScore') || '0', 10);
     let selectedPath = [];
     let isDragging = false;
     let isLooping = false;
-    let loopStartPos = null;
-    let history = [];
-    let startTime, timerInterval = null, elapsedSeconds = 0;
+    let particles = [];
+    let audioCtx = null;
+    let loopCombo = 0;
 
-    let showConfirm = false;
+    // シャッフル演出用の変数
     let isShuffling = false;
     let shuffleScale = 1.0;
-    let shuffleRotation = 0;
-    let dlgCancelBtn = null, dlgOkBtn = null;
-
-    let audioCtx = null;
-    let particles = [];
-
-    // --- ボーナス管理用の変数 ---
-    let loopCombo = 0;
+    let showConfirm = false;
 
     class Particle {
         constructor(x, y, color) {
@@ -171,226 +162,243 @@
     }
 
     function hasPossibleMoves() {
-        for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-            const dot = grid[r][c]; if (!dot) continue;
-            for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-                const nr=r+dr, nc=c+dc;
-                if (nr>=0&&nr<ROWS&&nc>=0&&nc<COLS&&grid[nr][nc]?.color===dot.color) return true;
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const dot = grid[r][c];
+                if (!dot) continue;
+                for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                    const nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc]?.color === dot.color) return true;
+                }
             }
         }
         return false;
     }
 
     function shuffleGrid() {
-        const all = [];
-        for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) if(grid[r][c]) all.push(grid[r][c].color);
-        for (let i=all.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1)); [all[i],all[j]]=[all[j],all[i]]; }
-        let idx=0;
-        for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) grid[r][c].color=all[idx++];
+        const colors = [];
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c]) colors.push(grid[r][c].color);
+            }
+        }
+        for (let i = colors.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [colors[i], colors[j]] = [colors[j], colors[i]];
+        }
+        let idx = 0;
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c]) grid[r][c].color = colors[idx++];
+            }
+        }
     }
 
     function ensurePossibleMoves(animate = true) {
         if (!hasPossibleMoves()) {
-            if (animate && !isShuffling) startShuffleAnimation();
-            else if (!animate) { let n=0; while(!hasPossibleMoves()&&n++<100) shuffleGrid(); }
+            if (animate) {
+                startShuffleAnimation();
+            } else {
+                let attempts = 0;
+                while (!hasPossibleMoves() && attempts < 100) {
+                    shuffleGrid();
+                    attempts++;
+                }
+            }
         }
     }
 
+    function startShuffleAnimation() {
+        if (isShuffling) return;
+        isShuffling = true;
+        let count = 0;
+        const interval = setInterval(() => {
+            shuffleGrid();
+            shuffleScale = 0.5 + Math.random() * 0.5;
+            count++;
+            if (count > 10 && hasPossibleMoves()) {
+                clearInterval(interval);
+                isShuffling = false;
+                shuffleScale = 1.0;
+            }
+        }, 100);
+    }
+
     function dropDots() {
-        for (let c=0;c<COLS;c++) {
-            let empty=0;
-            for (let r=ROWS-1;r>=0;r--) {
-                if(!grid[r][c]){empty++;}
-                else if(empty>0){
-                    grid[r+empty][c]=grid[r][c];
-                    grid[r+empty][c].targetY=(r+empty)*SPACING+SPACING/2;
-                    grid[r][c]=null;
+        for (let c = 0; c < COLS; c++) {
+            let empty = 0;
+            for (let r = ROWS - 1; r >= 0; r--) {
+                if (!grid[r][c]) {
+                    empty++;
+                } else if (empty > 0) {
+                    grid[r + empty][c] = grid[r][c];
+                    grid[r + empty][c].targetY = (r + empty) * SPACING + SPACING / 2;
+                    grid[r][c] = null;
                 }
             }
-            for (let r=0;r<empty;r++) {
-                grid[r][c]=createDot(r,c,COLORS[Math.floor(Math.random()*COLORS.length)]);
-                grid[r][c].visualY=(r-empty)*SPACING-50;
-                grid[r][c].vy=15;
+            for (let r = 0; r < empty; r++) {
+                grid[r][c] = createDot(r, c, COLORS[Math.floor(Math.random() * COLORS.length)]);
+                grid[r][c].visualY = (r - empty) * SPACING - 50;
+                grid[r][c].vy = 15;
             }
         }
     }
 
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        for (let i = particles.length - 1; i >= 0; i--) {
-            particles[i].update(); particles[i].draw(ctx);
-            if (particles[i].life <= 0) particles.splice(i, 1);
-        }
+        
+        particles.forEach((p, i) => {
+            p.update(); p.draw(ctx);
+            if (p.life <= 0) particles.splice(i, 1);
+        });
+
         if (selectedPath.length > 0 && !isShuffling) {
             const color = grid[selectedPath[0].r][selectedPath[0].c].color;
             ctx.beginPath();
-            ctx.lineWidth=6; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.strokeStyle=color;
-            selectedPath.forEach((p,i) => {
-                const x=p.c*SPACING+SPACING/2;
-                const y=grid[p.r][p.c]?.visualY ?? p.r*SPACING+SPACING/2;
-                i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+            ctx.lineWidth = 6; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = color;
+            selectedPath.forEach((p, i) => {
+                const x = p.c * SPACING + SPACING / 2;
+                const y = grid[p.r][p.c]?.visualY ?? p.r * SPACING + SPACING / 2;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
             });
             ctx.stroke();
         }
-        for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
-            const dot=grid[r][c]; if(!dot) continue;
-            if (!isShuffling) {
-                dot.vy += (dot.targetY-dot.visualY)*BOUNCE_STRENGTH;
-                dot.vy *= FRICTION; dot.visualY += dot.vy;
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const dot = grid[r][c]; if (!dot) continue;
+                if (!isShuffling) {
+                    dot.vy += (dot.targetY - dot.visualY) * BOUNCE_STRENGTH;
+                    dot.vy *= FRICTION; dot.visualY += dot.vy;
+                }
+                const x = c * SPACING + SPACING / 2;
+                ctx.save();
+                ctx.translate(x, dot.visualY);
+                if (isShuffling) ctx.scale(shuffleScale, shuffleScale);
+                ctx.beginPath(); ctx.arc(0, 0, DOT_SIZE, 0, Math.PI * 2);
+                ctx.fillStyle = dot.color; ctx.fill();
+                if (selectedPath.some(p => p.r === r && p.c === c) && !isShuffling) {
+                    ctx.lineWidth = 3; ctx.strokeStyle = 'white'; ctx.stroke();
+                }
+                ctx.restore();
             }
-            const x=c*SPACING+SPACING/2;
-            ctx.save(); ctx.translate(x, dot.visualY);
-            ctx.beginPath(); ctx.arc(0, 0, DOT_SIZE, 0, Math.PI*2);
-            ctx.fillStyle=dot.color; ctx.fill();
-            if (selectedPath.some(p=>p.r===r&&p.c===c) && !isShuffling) {
-                ctx.lineWidth=3; ctx.strokeStyle='white'; ctx.stroke();
-            }
-            ctx.restore();
         }
-        if (showConfirm) drawConfirmDialog();
         requestAnimationFrame(draw);
     }
 
-    // --- 加点計算用ヘルパー ---
     function checkBonuses() {
         let bonus = 0;
         let bonusTexts = [];
-
-        // 1. 直線6個判定
         if (selectedPath.length === 6) {
             const allSameRow = selectedPath.every(p => p.r === selectedPath[0].r);
             const allSameCol = selectedPath.every(p => p.c === selectedPath[0].c);
-            if (allSameRow || allSameCol) {
-                bonus += 5;
-                bonusTexts.push("Straight 6! +5");
-            }
+            if (allSameRow || allSameCol) { bonus += 5; bonusTexts.push("Straight 6! +5"); }
         }
-
-        // 2. ループ関連
         if (isLooping) {
             loopCombo++;
-            // コンボボーナス (2回目:+5, 3回目:+10...)
             if (loopCombo >= 2) {
                 const comboPoints = (loopCombo - 1) * 5;
-                bonus += comboPoints;
-                bonusTexts.push(`${loopCombo} Combo! +${comboPoints}`);
+                bonus += comboPoints; bonusTexts.push(`${loopCombo} Combo! +${comboPoints}`);
             }
-
-            // スクエア判定 (最小/最大座標からサイズを測る)
-            const rows = selectedPath.map(p => p.r);
-            const cols = selectedPath.map(p => p.c);
-            const minR = Math.min(...rows), maxR = Math.max(...rows);
-            const minC = Math.min(...cols), maxC = Math.max(...cols);
-            const height = maxR - minR + 1;
-            const width = maxC - minC + 1;
-
-            // 正方形かつ、選択したドット数が外周の数と一致（またはそれ以上）か簡易チェック
+            const rows = selectedPath.map(p => p.r), cols = selectedPath.map(p => p.c);
+            const height = Math.max(...rows) - Math.min(...rows) + 1;
+            const width = Math.max(...cols) - Math.min(...cols) + 1;
             if (height === width && height >= 3) {
-                const squareBonuses = { 3: 10, 4: 20, 5: 30, 6: 50 };
-                const sPoint = squareBonuses[height] || 0;
-                if (sPoint > 0) {
-                    bonus += sPoint;
-                    bonusTexts.push(`${height}x${height} Square! +${sPoint}`);
-                }
+                const sPoint = { 3: 10, 4: 20, 5: 30, 6: 50 }[height] || 0;
+                bonus += sPoint; bonusTexts.push(`${height}x${height} Square! +${sPoint}`);
             }
         } else {
-            loopCombo = 0; // ループしなかったらコンボ終了
+            loopCombo = 0;
         }
-
         if (bonus > 0) showBonusEffect(bonusTexts.join(" / "));
         return bonus;
     }
 
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault(); initAudio();
-        const {x, y} = getCanvasXY(e);
-        const pos = getGridPos(x, y);
-        if (pos && grid[pos.r][pos.c]) {
-            isDragging=true; selectedPath=[pos]; isLooping=false;
-            playDotSound(0);
-        }
-    }, {passive: false});
-
-    canvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        if (!isDragging) return;
-        const {x, y} = getCanvasXY(e);
-        const pos = getGridPos(x, y); if (!pos) return;
-        const last = selectedPath[selectedPath.length-1];
-        if (pos.r===last.r && pos.c===last.c) return;
-
-        const color = grid[selectedPath[0].r][selectedPath[0].c].color;
-        if (Math.abs(pos.r-last.r)+Math.abs(pos.c-last.c) !== 1) return;
-        if (grid[pos.r][pos.c]?.color !== color) return;
-
-        const idx = selectedPath.findIndex(p => p.r===pos.r && p.c===pos.c);
-        if (idx === -1) {
-            selectedPath.push(pos);
-            playDotSound(selectedPath.length-1, isLooping);
-        } else if (idx === selectedPath.length - 2) {
-            selectedPath.pop(); isLooping = false;
-        } else if (selectedPath.length >= 3) {
-            selectedPath.push(pos); isLooping = true;
-            playDotSound(selectedPath.length-1, true);
-        }
-    }, {passive: false});
-
-    canvas.addEventListener('touchend', (e) => {
-        if (!isDragging) return;
-        isDragging=false;
-
-        let baseScore = 0;
-        const bonusScore = checkBonuses(); // ボーナス計算
-
-        if (isLooping && selectedPath.length>=4) {
-            const color=grid[selectedPath[0].r][selectedPath[0].c].color;
-            playClearSound(true);
-            for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) {
-                if(grid[r][c]?.color===color){
-                    const dotX = c * SPACING + SPACING / 2;
-                    const dotY = grid[r][c].visualY;
-                    for (let i = 0; i < 8; i++) particles.push(new Particle(dotX, dotY, color));
-                    grid[r][c]=null; baseScore++;
-                }
-            }
-            dropDots(); ensurePossibleMoves();
-        } else if (selectedPath.length>=2) {
-            playClearSound(false);
-            new Set(selectedPath.map(p=>`${p.r},${p.c}`)).forEach(pt=>{
-                const [r,c]=pt.split(',').map(Number);
-                if(grid[r][c]){grid[r][c]=null; baseScore++;}
-            });
-            dropDots(); ensurePossibleMoves();
-        }
-
-        updateScore(score + baseScore + bonusScore);
-        selectedPath=[]; isLooping=false;
-    }, {passive: false});
-
-    // --- その他（Timer, UI） ---
     function getCanvasXY(e) {
         const rect = canvas.getBoundingClientRect();
         const t = e.touches?.[0] ?? e.changedTouches?.[0] ?? e;
         return { x: t.clientX - rect.left, y: t.clientY - rect.top };
     }
     function getGridPos(x, y) {
-        const c=Math.floor(x/SPACING), r=Math.floor(y/SPACING);
-        return (r>=0&&r<ROWS&&c>=0&&c<COLS) ? {r,c} : null;
+        const c = Math.floor(x / SPACING), r = Math.floor(y / SPACING);
+        return (r >= 0 && r < ROWS && c >= 0 && c < COLS) ? { r, c } : null;
     }
-    function startTimer() {
-        if (timerInterval) return;
-        startTime = Date.now();
-        timerInterval = setInterval(() => {
-            elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-            const m = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
-            const s = (elapsedSeconds % 60).toString().padStart(2, '0');
-            timerEl.innerText = `${m}:${s}`;
-        }, 1000);
-    }
-    
-    // 初期化実行
+
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault(); if (isShuffling) return;
+        initAudio();
+        const { x, y } = getCanvasXY(e);
+        const pos = getGridPos(x, y);
+        if (pos && grid[pos.r][pos.c]) {
+            isDragging = true; selectedPath = [pos]; isLooping = false;
+            playDotSound(0);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (!isDragging || isShuffling) return;
+        const { x, y } = getCanvasXY(e);
+        const pos = getGridPos(x, y); if (!pos) return;
+        const last = selectedPath[selectedPath.length - 1];
+        if (pos.r === last.r && pos.c === last.c) return;
+        const color = grid[selectedPath[0].r][selectedPath[0].c].color;
+        if (Math.abs(pos.r - last.r) + Math.abs(pos.c - last.c) !== 1) return;
+        if (grid[pos.r][pos.c]?.color !== color) return;
+
+        const idx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
+        if (idx === -1) {
+            selectedPath.push(pos);
+            playDotSound(selectedPath.length - 1, isLooping);
+        } else if (idx === selectedPath.length - 2) {
+            selectedPath.pop(); isLooping = false;
+        } else if (selectedPath.length >= 3) {
+            selectedPath.push(pos); isLooping = true;
+            playDotSound(selectedPath.length - 1, true);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+        if (!isDragging) return;
+        isDragging = false;
+        let baseScore = 0;
+        const bonusScore = checkBonuses();
+        if (isLooping && selectedPath.length >= 4) {
+            const color = grid[selectedPath[0].r][selectedPath[0].c].color;
+            playClearSound(true);
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (grid[r][c]?.color === color) {
+                        for (let i = 0; i < 5; i++) particles.push(new Particle(c * SPACING + SPACING / 2, grid[r][c].visualY, color));
+                        grid[r][c] = null; baseScore++;
+                    }
+                }
+            }
+        } else if (selectedPath.length >= 2) {
+            playClearSound(false);
+            selectedPath.forEach(p => {
+                if (grid[p.r][p.c]) {
+                    for (let i = 0; i < 5; i++) particles.push(new Particle(p.c * SPACING + SPACING / 2, grid[p.r][p.c].visualY, grid[p.r][p.c].color));
+                    grid[p.r][p.c] = null; baseScore++;
+                }
+            });
+        }
+        if (baseScore > 0) {
+            dropDots();
+            setTimeout(() => ensurePossibleMoves(true), 500);
+        }
+        updateScore(score + baseScore + bonusScore);
+        selectedPath = []; isLooping = false;
+    }, { passive: false });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+        if(confirm("Scoreをリセットして新しく始めますか？")) {
+            updateScore(0); initGrid();
+        }
+    });
+
     canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
-    initGrid(); scoreEl.innerText = score;
+    initGrid();
     requestAnimationFrame(draw);
 </script>
 </body>
