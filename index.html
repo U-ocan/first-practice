@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Burst Effect</title>
+    <title>Dots Game - Bonus System</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -20,9 +20,13 @@
         #resetBtn { border-color: #FF5252; color: #FF5252; }
         #resetBtn:active { background: #3d1a1a; }
         .cost-label { font-size: 0.8em; color: #aaa; margin-left: 5px; }
+        /* ボーナス通知の簡易表示（おまけ） */
+        #bonus-msg { position: absolute; top: 100px; color: #FFEB3B; font-weight: bold; pointer-events: none; opacity: 0; transition: 0.3s; }
     </style>
 </head>
 <body>
+
+<div id="bonus-msg">BONUS!</div>
 
 <div id="info-container">
     <div class="info-item">Score: <span id="score">0</span></div>
@@ -41,12 +45,13 @@
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
     const timerEl = document.getElementById('timer');
+    const bonusMsgEl = document.getElementById('bonus-msg');
 
     const ROWS = 6, COLS = 6;
     const DOT_SIZE = 11;
     const SPACING = 50;
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
-    const BOUNCE_STRENGTH = 0.17;
+    const BOUNCE_STRENGTH = 0.15;
     const FRICTION = 0.6;
     const UNDO_COST = 5;
 
@@ -66,38 +71,31 @@
     let dlgCancelBtn = null, dlgOkBtn = null;
 
     let audioCtx = null;
-    let particles = []; // パーティクルを格納する配列
+    let particles = [];
 
-    // --- パーティクルクラスの定義 ---
+    // --- ボーナス管理用の変数 ---
+    let loopCombo = 0;
+
     class Particle {
         constructor(x, y, color) {
-            this.x = x;
-            this.y = y;
-            this.color = color;
-            // 弾ける速度と方向をランダムに設定
+            this.x = x; this.y = y; this.color = color;
             const angle = Math.random() * Math.PI * 2;
             const speed = Math.random() * 4 + 2; 
             this.vx = Math.cos(angle) * speed;
             this.vy = Math.sin(angle) * speed;
-            this.life = 1.0; // 寿命（透明度） 1.0 -> 0.0
-            this.decay = Math.random() * 0.03 + 0.02; // 消える速度
-            this.size = Math.random() * 3 + 2; // 粒の大きさ
+            this.life = 1.0;
+            this.decay = Math.random() * 0.03 + 0.02;
+            this.size = Math.random() * 3 + 2;
         }
-
         update() {
-            this.x += this.vx;
-            this.y += this.vy;
-            // 重力（少し下に落ちる）と摩擦
-            this.vy += 0.1;
-            this.vx *= 0.95;
-            this.vy *= 0.95;
+            this.x += this.vx; this.y += this.vy;
+            this.vy += 0.1; this.vx *= 0.95; this.vy *= 0.95;
             this.life -= this.decay;
         }
-
         draw(ctx) {
             if (this.life <= 0) return;
             ctx.save();
-            ctx.globalAlpha = this.life; // 透明度を適用
+            ctx.globalAlpha = this.life;
             ctx.fillStyle = this.color;
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
@@ -106,19 +104,13 @@
         }
     }
 
-    // --- 既存の関数群 ---
     function initAudio() {
-        if (!audioCtx) {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        if (audioCtx.state === 'suspended') {
-            audioCtx.resume();
-        }
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
     }
 
     function playDotSound(step, isSpecial = false) {
-        initAudio();
-        if (!audioCtx) return;
+        initAudio(); if (!audioCtx) return;
         const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00, 1046.50];
         let freq = scale[Math.min(step, scale.length - 1)];
         if (isSpecial) freq *= 2.0;
@@ -134,8 +126,7 @@
     }
 
     function playClearSound(isLoop = false) {
-        initAudio();
-        if (!audioCtx) return;
+        initAudio(); if (!audioCtx) return;
         const freqs = isLoop ? [523.25, 659.25, 783.99, 1046.50] : [523.25, 659.25, 783.99];
         freqs.forEach(freq => {
             const osc = audioCtx.createOscillator();
@@ -150,29 +141,13 @@
         });
     }
 
-    function playShuffleSound() {
-        initAudio();
-        if (!audioCtx) return;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(110, audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.6);
-        gain.gain.setValueAtTime(0, audioCtx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.1);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
-        osc.connect(gain); gain.connect(audioCtx.destination);
-        osc.start(); osc.stop(audioCtx.currentTime + 0.6);
-    }
-
-    function startTimer() {
-        if (timerInterval) return;
-        startTime = Date.now();
-        timerInterval = setInterval(() => {
-            elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-            const m = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
-            const s = (elapsedSeconds % 60).toString().padStart(2, '0');
-            timerEl.innerText = `${m}:${s}`;
+    function showBonusEffect(txt) {
+        bonusMsgEl.innerText = txt;
+        bonusMsgEl.style.opacity = 1;
+        bonusMsgEl.style.transform = "translateY(-20px)";
+        setTimeout(() => {
+            bonusMsgEl.style.opacity = 0;
+            bonusMsgEl.style.transform = "translateY(0)";
         }, 1000);
     }
 
@@ -216,46 +191,9 @@
 
     function ensurePossibleMoves(animate = true) {
         if (!hasPossibleMoves()) {
-            if (animate && !isShuffling) {
-                startShuffleAnimation();
-            } else if (!animate) {
-                let n=0; while(!hasPossibleMoves()&&n++<100) shuffleGrid();
-            }
+            if (animate && !isShuffling) startShuffleAnimation();
+            else if (!animate) { let n=0; while(!hasPossibleMoves()&&n++<100) shuffleGrid(); }
         }
-    }
-
-    function startShuffleAnimation() {
-        isShuffling = true;
-        playShuffleSound();
-        let duration = 30;
-        let frame = 0;
-        const outInt = setInterval(() => {
-            frame++;
-            shuffleScale = 1.0 - (frame / duration);
-            shuffleRotation += 0.2;
-            if (frame >= duration) {
-                clearInterval(outInt);
-                shuffleGrid();
-                while(!hasPossibleMoves()) shuffleGrid();
-                frame = 0;
-                const inInt = setInterval(() => {
-                    frame++;
-                    shuffleScale = frame / duration;
-                    shuffleRotation += 0.2;
-                    if (frame >= duration) {
-                        clearInterval(inInt);
-                        shuffleScale = 1.0;
-                        shuffleRotation = 0;
-                        isShuffling = false;
-                    }
-                }, 16);
-            }
-        }, 16);
-    }
-
-    function saveState() {
-        history.push(JSON.stringify({grid:grid.map(row=>row.map(d=>({...d}))),score}));
-        if(history.length>20) history.shift();
     }
 
     function dropDots() {
@@ -277,60 +215,16 @@
         }
     }
 
-    function roundRect(x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
-        ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
-        ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
-        ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
-        ctx.closePath();
-    }
-
-    function drawConfirmDialog() {
-        const cx = canvas.width/2, cy = canvas.height/2;
-        const dw = 220, dh = 130;
-        const dx = cx-dw/2, dy = cy-dh/2;
-        ctx.fillStyle = 'rgba(0,0,0,0.65)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#2c2c2c';
-        roundRect(dx, dy, dw, dh, 14); ctx.fill();
-        ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
-        roundRect(dx, dy, dw, dh, 14); ctx.stroke();
-        ctx.fillStyle = '#e0e0e0'; ctx.textAlign = 'center'; ctx.font = '14px sans-serif';
-        ctx.fillText('スコアとタイマーを', cx, cy - 26);
-        ctx.fillText('リセットしますか？', cx, cy - 8);
-        const bw=88, bh=34, gap=12, totalBW = bw*2+gap, cancelX = cx - totalBW/2, okX = cancelX + bw + gap, btnY = cy + 14;
-        dlgCancelBtn = {x:cancelX, y:btnY, w:bw, h:bh};
-        dlgOkBtn     = {x:okX,     y:btnY, w:bw, h:bh};
-        ctx.fillStyle = '#3a3a3a'; roundRect(cancelX, btnY, bw, bh, 17); ctx.fill();
-        ctx.fillStyle = '#ccc'; ctx.fillText('キャンセル', cancelX+bw/2, btnY+22);
-        ctx.fillStyle = '#1a0a0a'; roundRect(okX, btnY, bw, bh, 17); ctx.fill();
-        ctx.strokeStyle = '#FF5252'; roundRect(okX, btnY, bw, bh, 17); ctx.stroke();
-        ctx.fillStyle = '#FF5252'; ctx.fillText('リセット', okX+bw/2, btnY+22);
-    }
-
-    function hitBtn(btn, x, y) { return btn && x>=btn.x && x<=btn.x+btn.w && y>=btn.y && y<=btn.y+btn.h; }
-
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // --- パーティクルの更新と描画 ---
         for (let i = particles.length - 1; i >= 0; i--) {
-            particles[i].update();
-            particles[i].draw(ctx);
-            // 寿命が尽きたパーティクルを削除
-            if (particles[i].life <= 0) {
-                particles.splice(i, 1);
-            }
+            particles[i].update(); particles[i].draw(ctx);
+            if (particles[i].life <= 0) particles.splice(i, 1);
         }
-
-        // --- 既存の描画処理 ---
-        // パスの描画
         if (selectedPath.length > 0 && !isShuffling) {
             const color = grid[selectedPath[0].r][selectedPath[0].c].color;
             ctx.beginPath();
-            ctx.lineWidth=6; ctx.lineJoin='round'; ctx.lineCap='round';
-            ctx.strokeStyle=color;
+            ctx.lineWidth=6; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.strokeStyle=color;
             selectedPath.forEach((p,i) => {
                 const x=p.c*SPACING+SPACING/2;
                 const y=grid[p.r][p.c]?.visualY ?? p.r*SPACING+SPACING/2;
@@ -338,160 +232,166 @@
             });
             ctx.stroke();
         }
-
-        // ドットの描画
         for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
             const dot=grid[r][c]; if(!dot) continue;
             if (!isShuffling) {
                 dot.vy += (dot.targetY-dot.visualY)*BOUNCE_STRENGTH;
-                dot.vy *= FRICTION;
-                dot.visualY += dot.vy;
+                dot.vy *= FRICTION; dot.visualY += dot.vy;
             }
             const x=c*SPACING+SPACING/2;
-            ctx.save();
-            ctx.translate(x, dot.visualY);
-            if (isShuffling) {
-                ctx.scale(shuffleScale, shuffleScale);
-                ctx.rotate(shuffleRotation);
-            }
-            ctx.beginPath();
-            ctx.arc(0, 0, DOT_SIZE, 0, Math.PI*2);
+            ctx.save(); ctx.translate(x, dot.visualY);
+            ctx.beginPath(); ctx.arc(0, 0, DOT_SIZE, 0, Math.PI*2);
             ctx.fillStyle=dot.color; ctx.fill();
             if (selectedPath.some(p=>p.r===r&&p.c===c) && !isShuffling) {
                 ctx.lineWidth=3; ctx.strokeStyle='white'; ctx.stroke();
             }
             ctx.restore();
         }
-
         if (showConfirm) drawConfirmDialog();
         requestAnimationFrame(draw);
     }
 
-    function getCanvasXY(e) {
-        const rect = canvas.getBoundingClientRect();
-        const t = e.touches?.[0] ?? e.changedTouches?.[0] ?? e;
-        return { x: t.clientX - rect.left, y: t.clientY - rect.top };
-    }
+    // --- 加点計算用ヘルパー ---
+    function checkBonuses() {
+        let bonus = 0;
+        let bonusTexts = [];
 
-    function getGridPos(x, y) {
-        const c=Math.floor(x/SPACING), r=Math.floor(y/SPACING);
-        return (r>=0&&r<ROWS&&c>=0&&c<COLS) ? {r,c} : null;
-    }
-
-    // --- タッチイベント群 ---
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        initAudio();
-        if (isShuffling) return;
-        const {x, y} = getCanvasXY(e);
-        if (showConfirm) {
-            if (hitBtn(dlgCancelBtn, x, y)) { showConfirm = false; }
-            else if (hitBtn(dlgOkBtn, x, y)) { showConfirm = false; execReset(); }
-            return;
+        // 1. 直線6個判定
+        if (selectedPath.length === 6) {
+            const allSameRow = selectedPath.every(p => p.r === selectedPath[0].r);
+            const allSameCol = selectedPath.every(p => p.c === selectedPath[0].c);
+            if (allSameRow || allSameCol) {
+                bonus += 5;
+                bonusTexts.push("Straight 6! +5");
+            }
         }
-        startTimer(); saveState();
+
+        // 2. ループ関連
+        if (isLooping) {
+            loopCombo++;
+            // コンボボーナス (2回目:+5, 3回目:+10...)
+            if (loopCombo >= 2) {
+                const comboPoints = (loopCombo - 1) * 5;
+                bonus += comboPoints;
+                bonusTexts.push(`${loopCombo} Combo! +${comboPoints}`);
+            }
+
+            // スクエア判定 (最小/最大座標からサイズを測る)
+            const rows = selectedPath.map(p => p.r);
+            const cols = selectedPath.map(p => p.c);
+            const minR = Math.min(...rows), maxR = Math.max(...rows);
+            const minC = Math.min(...cols), maxC = Math.max(...cols);
+            const height = maxR - minR + 1;
+            const width = maxC - minC + 1;
+
+            // 正方形かつ、選択したドット数が外周の数と一致（またはそれ以上）か簡易チェック
+            if (height === width && height >= 3) {
+                const squareBonuses = { 3: 10, 4: 20, 5: 30, 6: 50 };
+                const sPoint = squareBonuses[height] || 0;
+                if (sPoint > 0) {
+                    bonus += sPoint;
+                    bonusTexts.push(`${height}x${height} Square! +${sPoint}`);
+                }
+            }
+        } else {
+            loopCombo = 0; // ループしなかったらコンボ終了
+        }
+
+        if (bonus > 0) showBonusEffect(bonusTexts.join(" / "));
+        return bonus;
+    }
+
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault(); initAudio();
+        const {x, y} = getCanvasXY(e);
         const pos = getGridPos(x, y);
         if (pos && grid[pos.r][pos.c]) {
-            isDragging=true; selectedPath=[pos]; isLooping=false; loopStartPos=null;
+            isDragging=true; selectedPath=[pos]; isLooping=false;
             playDotSound(0);
         }
     }, {passive: false});
 
     canvas.addEventListener('touchmove', (e) => {
         e.preventDefault();
-        if (showConfirm || !isDragging || isShuffling) return;
+        if (!isDragging) return;
         const {x, y} = getCanvasXY(e);
         const pos = getGridPos(x, y); if (!pos) return;
         const last = selectedPath[selectedPath.length-1];
         if (pos.r===last.r && pos.c===last.c) return;
 
         const color = grid[selectedPath[0].r][selectedPath[0].c].color;
-
         if (Math.abs(pos.r-last.r)+Math.abs(pos.c-last.c) !== 1) return;
         if (grid[pos.r][pos.c]?.color !== color) return;
 
         const idx = selectedPath.findIndex(p => p.r===pos.r && p.c===pos.c);
-
         if (idx === -1) {
             selectedPath.push(pos);
             playDotSound(selectedPath.length-1, isLooping);
         } else if (idx === selectedPath.length - 2) {
-            selectedPath.pop();
-            isLooping = false;
-            loopStartPos = null;
+            selectedPath.pop(); isLooping = false;
         } else if (selectedPath.length >= 3) {
-            selectedPath.push(pos);
-            isLooping = true;
-            loopStartPos = pos;
+            selectedPath.push(pos); isLooping = true;
             playDotSound(selectedPath.length-1, true);
         }
     }, {passive: false});
 
     canvas.addEventListener('touchend', (e) => {
-        if (showConfirm || !isDragging || isShuffling) return;
+        if (!isDragging) return;
         isDragging=false;
-        if (isLooping && selectedPath.length>=4 && loopStartPos) {
-            // ★ループ完成時の処理★
+
+        let baseScore = 0;
+        const bonusScore = checkBonuses(); // ボーナス計算
+
+        if (isLooping && selectedPath.length>=4) {
             const color=grid[selectedPath[0].r][selectedPath[0].c].color;
             playClearSound(true);
-            
             for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) {
                 if(grid[r][c]?.color===color){
-                    // 消えるドットの座標にパーティクルを生成（1ドットにつき8粒）
                     const dotX = c * SPACING + SPACING / 2;
                     const dotY = grid[r][c].visualY;
-                    for (let i = 0; i < 8; i++) {
-                        particles.push(new Particle(dotX, dotY, color));
-                    }
-                    grid[r][c]=null;
-                    score++;
+                    for (let i = 0; i < 8; i++) particles.push(new Particle(dotX, dotY, color));
+                    grid[r][c]=null; baseScore++;
                 }
             }
             dropDots(); ensurePossibleMoves();
         } else if (selectedPath.length>=2) {
-            // 通常消しの処理（演出なし）
             playClearSound(false);
             new Set(selectedPath.map(p=>`${p.r},${p.c}`)).forEach(pt=>{
                 const [r,c]=pt.split(',').map(Number);
-                if(grid[r][c]){grid[r][c]=null;score++;}
+                if(grid[r][c]){grid[r][c]=null; baseScore++;}
             });
             dropDots(); ensurePossibleMoves();
         }
-        updateScore(score);
-        selectedPath=[]; isLooping=false; loopStartPos=null;
+
+        updateScore(score + baseScore + bonusScore);
+        selectedPath=[]; isLooping=false;
     }, {passive: false});
 
-    // --- コントロール系 ---
-    document.getElementById('undoBtn').addEventListener('click', () => {
-        initAudio();
-        if (isShuffling) return;
-        if (history.length>0 && score>=UNDO_COST) {
-            updateScore(score-UNDO_COST);
-            grid = JSON.parse(history.pop()).grid;
-        } else if (score<UNDO_COST) {
-            scoreEl.style.color='#FF5252'; setTimeout(()=>scoreEl.style.color='#e0e0e0', 500);
-        }
-    });
-
-    document.getElementById('resetBtn').addEventListener('click', () => { 
-        initAudio();
-        if(!isShuffling) showConfirm = true; 
-    });
-
-    function execReset() {
-        if(timerInterval){clearInterval(timerInterval);timerInterval=null;}
-        elapsedSeconds=0; timerEl.innerText='00:00';
-        updateScore(0);
-        history=[]; selectedPath=[]; isDragging=false; isLooping=false; loopStartPos=null;
-        particles = []; // リセット時にパーティクルも消す
-        grid=[]; initGrid();
+    // --- その他（Timer, UI） ---
+    function getCanvasXY(e) {
+        const rect = canvas.getBoundingClientRect();
+        const t = e.touches?.[0] ?? e.changedTouches?.[0] ?? e;
+        return { x: t.clientX - rect.left, y: t.clientY - rect.top };
     }
-
-    // --- ゲーム開始 ---
-    canvas.width  = COLS * SPACING; canvas.height = ROWS * SPACING;
+    function getGridPos(x, y) {
+        const c=Math.floor(x/SPACING), r=Math.floor(y/SPACING);
+        return (r>=0&&r<ROWS&&c>=0&&c<COLS) ? {r,c} : null;
+    }
+    function startTimer() {
+        if (timerInterval) return;
+        startTime = Date.now();
+        timerInterval = setInterval(() => {
+            elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            const m = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
+            const s = (elapsedSeconds % 60).toString().padStart(2, '0');
+            timerEl.innerText = `${m}:${s}`;
+        }, 1000);
+    }
+    
+    // 初期化実行
+    canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
     initGrid(); scoreEl.innerText = score;
     requestAnimationFrame(draw);
 </script>
-
 </body>
 </html>
