@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Special Bonus Version</title>
+    <title>Dots Game - Full Sound & Bonus Version</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -19,7 +19,7 @@
         button:active { background: #3d3d3d; }
         #undoBtn { border-color: #448AFF; color: #448AFF; }
         #resetBtn { border-color: #FF5252; color: #FF5252; }
-        #bonus-msg { position: absolute; top: 80px; color: #FFEB3B; font-weight: bold; font-size: 20px; pointer-events: none; opacity: 0; transition: 0.3s; z-index: 10; text-align: center; width: 100%; }
+        #bonus-msg { position: absolute; top: 80px; color: #FFEB3B; font-weight: bold; font-size: 20px; pointer-events: none; opacity: 0; transition: 0.3s; z-index: 10; text-align: center; width: 100%; white-space: pre-wrap; }
     </style>
 </head>
 <body>
@@ -55,6 +55,40 @@
     let selectedPath = [], isDragging = false, isLooping = false;
     let history = [], startTime = null, timerInterval = null, particles = [];
     let loopCombo = 0, isShuffling = false, audioCtx = null;
+
+    // --- 音響システム ---
+    function initAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    function playDotSound(step, isSpecial = false) {
+        initAudio(); if (!audioCtx) return;
+        const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00];
+        let freq = scale[Math.min(step, scale.length - 1)];
+        if (isSpecial) freq *= 2.0;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+    }
+
+    function playClearSound(isLoop = false) {
+        initAudio(); if (!audioCtx) return;
+        const freqs = isLoop ? [523.25, 659.25, 783.99, 1046.50] : [523.25, 659.25, 783.99];
+        freqs.forEach((freq, i) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime + i*0.05);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime + i*0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(audioCtx.currentTime + i*0.05); osc.stop(audioCtx.currentTime + 0.4);
+        });
+    }
 
     class Particle {
         constructor(x, y, color) {
@@ -100,47 +134,30 @@
 
     function showBonus(txt) {
         bonusMsgEl.innerText = txt; bonusMsgEl.style.opacity = 1; bonusMsgEl.style.transform = "translateY(-10px)";
-        setTimeout(() => { bonusMsgEl.style.opacity = 0; bonusMsgEl.style.transform = "translateY(0)"; }, 1200);
+        setTimeout(() => { bonusMsgEl.style.opacity = 0; bonusMsgEl.style.transform = "translateY(0)"; }, 1500);
     }
 
-    // --- ボーナス計算エンジン ---
     function calculateSpecialBonuses() {
-        let bonus = 0;
-        let msgs = [];
-
-        // 1. 直線6個ボーナス
+        let bonus = 0; let msgs = [];
         if (selectedPath.length === 6) {
             const allSameRow = selectedPath.every(p => p.r === selectedPath[0].r);
             const allSameCol = selectedPath.every(p => p.c === selectedPath[0].c);
-            if (allSameRow || allSameCol) {
-                bonus += 5; msgs.push("Straight 6! +5");
-            }
+            if (allSameRow || allSameCol) { bonus += 5; msgs.push("Straight 6! +5"); }
         }
-
-        // 2. ループ関連
         if (isLooping) {
             loopCombo++;
-            // コンボボーナス (2回目:+5, 3回目:+10...)
             if (loopCombo >= 2) {
                 const comboPts = (loopCombo - 1) * 5;
-                bonus += comboPts;
-                msgs.push(`${loopCombo} Loop Combo! +${comboPts}`);
+                bonus += comboPts; msgs.push(`${loopCombo} Loop Combo! +${comboPts}`);
             }
-
-            // スクエア判定
             const rows = selectedPath.map(p => p.r), cols = selectedPath.map(p => p.c);
             const h = Math.max(...rows) - Math.min(...rows) + 1;
             const w = Math.max(...cols) - Math.min(...cols) + 1;
             if (h === w && h >= 3) {
-                const sqTable = { 3: 10, 4: 20, 5: 30, 6: 50 };
-                const sqPts = sqTable[h] || 0;
-                bonus += sqPts;
-                msgs.push(`${h}x${h} Square! +${sqPts}`);
+                const sqPts = { 3: 10, 4: 20, 5: 30, 6: 50 }[h] || 0;
+                bonus += sqPts; msgs.push(`${h}x${h} Square! +${sqPts}`);
             }
-        } else {
-            loopCombo = 0;
-        }
-
+        } else { loopCombo = 0; }
         if (msgs.length > 0) showBonus(msgs.join("\n"));
         return bonus;
     }
@@ -225,9 +242,14 @@
     };
 
     canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault(); if (isShuffling) return; startTimer();
+        e.preventDefault(); if (isShuffling) return; 
+        initAudio(); // 音声コンテキストの有効化
+        startTimer();
         const pos = getPos(e);
-        if (pos && grid[pos.r][pos.c]) { isDragging = true; selectedPath = [pos]; isLooping = false; }
+        if (pos && grid[pos.r][pos.c]) { 
+            isDragging = true; selectedPath = [pos]; isLooping = false; 
+            playDotSound(0);
+        }
     });
 
     canvas.addEventListener('touchmove', (e) => {
@@ -239,9 +261,17 @@
         if (grid[pos.r][pos.c].color !== grid[selectedPath[0].r][selectedPath[0].c].color) return;
 
         const idx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
-        if (idx === -1) { selectedPath.push(pos); isLooping = false; }
-        else if (idx === selectedPath.length - 2) { selectedPath.pop(); isLooping = false; }
-        else { isLooping = true; selectedPath.push(pos); }
+        if (idx === -1) { 
+            selectedPath.push(pos); isLooping = false; 
+            playDotSound(selectedPath.length - 1);
+        }
+        else if (idx === selectedPath.length - 2) { 
+            selectedPath.pop(); isLooping = false; 
+        }
+        else if (selectedPath.length >= 3) { 
+            isLooping = true; selectedPath.push(pos); 
+            playDotSound(selectedPath.length - 1, true); // ループ時は高音
+        }
     });
 
     canvas.addEventListener('touchend', () => {
@@ -250,6 +280,7 @@
             saveHistory();
             const color = grid[selectedPath[0].r][selectedPath[0].c].color;
             let baseScore = 0;
+            playClearSound(isLooping); // 消去音
 
             if (isLooping) {
                 for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
@@ -276,13 +307,14 @@
     });
 
     document.getElementById('undoBtn').addEventListener('click', () => {
+        initAudio();
         if (history.length > 0 && score >= UNDO_COST) {
             const last = history.pop(); grid = last.grid; updateScore(score - UNDO_COST);
         }
     });
 
     document.getElementById('resetBtn').addEventListener('click', () => {
-        if(confirm("Reset?")) { localStorage.clear(); location.reload(); }
+        if(confirm("Scoreをリセットしますか？")) { localStorage.clear(); location.reload(); }
     });
 
     canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
