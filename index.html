@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dots Game - Fixed Version</title>
+    <title>Dots Game - Special Bonus Version</title>
     <style>
         body { 
             margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; 
@@ -17,10 +17,9 @@
         #controls { margin-top: 25px; display: flex; gap: 15px; }
         button { padding: 14px 28px; font-size: 16px; border-radius: 30px; border: 1px solid #444; background: #2c2c2c; color: #fff; cursor: pointer; }
         button:active { background: #3d3d3d; }
+        #undoBtn { border-color: #448AFF; color: #448AFF; }
         #resetBtn { border-color: #FF5252; color: #FF5252; }
-        #resetBtn:active { background: #3d1a1a; }
-        .cost-label { font-size: 0.8em; color: #aaa; margin-left: 5px; }
-        #bonus-msg { position: absolute; top: 100px; color: #FFEB3B; font-weight: bold; pointer-events: none; opacity: 0; transition: 0.3s; }
+        #bonus-msg { position: absolute; top: 80px; color: #FFEB3B; font-weight: bold; font-size: 20px; pointer-events: none; opacity: 0; transition: 0.3s; z-index: 10; text-align: center; width: 100%; }
     </style>
 </head>
 <body>
@@ -35,7 +34,7 @@
 <canvas id="gameCanvas"></canvas>
 
 <div id="controls">
-    <button id="undoBtn">Undo <span class="cost-label">(-5pts)</span></button>
+    <button id="undoBtn">Undo <span style="font-size:0.8em; color:#aaa;">(-5)</span></button>
     <button id="resetBtn">Reset</button>
 </div>
 
@@ -47,129 +46,111 @@
     const bonusMsgEl = document.getElementById('bonus-msg');
 
     const ROWS = 6, COLS = 6;
-    const DOT_SIZE = 11;
-    const SPACING = 50;
+    const DOT_SIZE = 11, SPACING = 50;
     const COLORS = ['#FF5252', '#448AFF', '#4CAF50', '#FFEB3B', '#9C27B0'];
-    const BOUNCE_STRENGTH = 0.15;
-    const FRICTION = 0.6;
+    const UNDO_COST = 5;
 
     let grid = [];
     let score = parseInt(localStorage.getItem('dotsGameScore') || '0', 10);
-    let selectedPath = [];
-    let isDragging = false;
-    let isLooping = false;
-    let particles = [];
-    let audioCtx = null;
-    let loopCombo = 0;
-
-    // シャッフル演出用の変数
-    let isShuffling = false;
-    let shuffleScale = 1.0;
-    let showConfirm = false;
+    let selectedPath = [], isDragging = false, isLooping = false;
+    let history = [], startTime = null, timerInterval = null, particles = [];
+    let loopCombo = 0, isShuffling = false, audioCtx = null;
 
     class Particle {
         constructor(x, y, color) {
             this.x = x; this.y = y; this.color = color;
             const angle = Math.random() * Math.PI * 2;
-            const speed = Math.random() * 4 + 2; 
+            const speed = Math.random() * 3 + 2;
             this.vx = Math.cos(angle) * speed;
             this.vy = Math.sin(angle) * speed;
-            this.life = 1.0;
-            this.decay = Math.random() * 0.03 + 0.02;
-            this.size = Math.random() * 3 + 2;
+            this.life = 1.0; this.decay = 0.03;
         }
-        update() {
-            this.x += this.vx; this.y += this.vy;
-            this.vy += 0.1; this.vx *= 0.95; this.vy *= 0.95;
-            this.life -= this.decay;
-        }
+        update() { this.x += this.vx; this.y += this.vy; this.vy += 0.1; this.life -= this.decay; }
         draw(ctx) {
             if (this.life <= 0) return;
-            ctx.save();
-            ctx.globalAlpha = this.life;
-            ctx.fillStyle = this.color;
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
+            ctx.save(); ctx.globalAlpha = this.life; ctx.fillStyle = this.color;
+            ctx.beginPath(); ctx.arc(this.x, this.y, 3, 0, Math.PI * 2); ctx.fill(); ctx.restore();
         }
-    }
-
-    function initAudio() {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-    }
-
-    function playDotSound(step, isSpecial = false) {
-        initAudio(); if (!audioCtx) return;
-        const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00, 1046.50];
-        let freq = scale[Math.min(step, scale.length - 1)];
-        if (isSpecial) freq *= 2.0;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0, audioCtx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-        osc.connect(gain); gain.connect(audioCtx.destination);
-        osc.start(); osc.stop(audioCtx.currentTime + 0.3);
-    }
-
-    function playClearSound(isLoop = false) {
-        initAudio(); if (!audioCtx) return;
-        const freqs = isLoop ? [523.25, 659.25, 783.99, 1046.50] : [523.25, 659.25, 783.99];
-        freqs.forEach(freq => {
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0, audioCtx.currentTime);
-            gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.05);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            osc.start(); osc.stop(audioCtx.currentTime + 0.4);
-        });
-    }
-
-    function showBonusEffect(txt) {
-        bonusMsgEl.innerText = txt;
-        bonusMsgEl.style.opacity = 1;
-        bonusMsgEl.style.transform = "translateY(-20px)";
-        setTimeout(() => {
-            bonusMsgEl.style.opacity = 0;
-            bonusMsgEl.style.transform = "translateY(0)";
-        }, 1000);
-    }
-
-    function updateScore(v) {
-        score = v;
-        scoreEl.innerText = score;
-        localStorage.setItem('dotsGameScore', score);
-    }
-
-    function createDot(r, c, color) {
-        return { color, visualY: r*SPACING + SPACING/2, targetY: r*SPACING + SPACING/2, vy: 0 };
     }
 
     function initGrid() {
         for (let r = 0; r < ROWS; r++) {
             grid[r] = [];
-            for (let c = 0; c < COLS; c++)
-                grid[r][c] = createDot(r, c, COLORS[Math.floor(Math.random()*COLORS.length)]);
+            for (let c = 0; c < COLS; c++) grid[r][c] = { color: COLORS[Math.floor(Math.random()*COLORS.length)], visualY: r*SPACING+25, targetY: r*SPACING+25, vy: 0 };
         }
-        ensurePossibleMoves(false);
+        if (!hasPossibleMoves()) shuffleGrid();
+    }
+
+    function updateScore(v) { score = Math.max(0, v); scoreEl.innerText = score; localStorage.setItem('dotsGameScore', score); }
+
+    function startTimer() {
+        if (timerInterval) return;
+        startTime = Date.now();
+        timerInterval = setInterval(() => {
+            const sec = Math.floor((Date.now() - startTime) / 1000);
+            timerEl.innerText = `${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}`;
+        }, 1000);
+    }
+
+    function saveHistory() {
+        const gridCopy = grid.map(row => row.map(dot => dot ? {...dot} : null));
+        history.push({ grid: gridCopy, score: score });
+        if (history.length > 10) history.shift();
+    }
+
+    function showBonus(txt) {
+        bonusMsgEl.innerText = txt; bonusMsgEl.style.opacity = 1; bonusMsgEl.style.transform = "translateY(-10px)";
+        setTimeout(() => { bonusMsgEl.style.opacity = 0; bonusMsgEl.style.transform = "translateY(0)"; }, 1200);
+    }
+
+    // --- ボーナス計算エンジン ---
+    function calculateSpecialBonuses() {
+        let bonus = 0;
+        let msgs = [];
+
+        // 1. 直線6個ボーナス
+        if (selectedPath.length === 6) {
+            const allSameRow = selectedPath.every(p => p.r === selectedPath[0].r);
+            const allSameCol = selectedPath.every(p => p.c === selectedPath[0].c);
+            if (allSameRow || allSameCol) {
+                bonus += 5; msgs.push("Straight 6! +5");
+            }
+        }
+
+        // 2. ループ関連
+        if (isLooping) {
+            loopCombo++;
+            // コンボボーナス (2回目:+5, 3回目:+10...)
+            if (loopCombo >= 2) {
+                const comboPts = (loopCombo - 1) * 5;
+                bonus += comboPts;
+                msgs.push(`${loopCombo} Loop Combo! +${comboPts}`);
+            }
+
+            // スクエア判定
+            const rows = selectedPath.map(p => p.r), cols = selectedPath.map(p => p.c);
+            const h = Math.max(...rows) - Math.min(...rows) + 1;
+            const w = Math.max(...cols) - Math.min(...cols) + 1;
+            if (h === w && h >= 3) {
+                const sqTable = { 3: 10, 4: 20, 5: 30, 6: 50 };
+                const sqPts = sqTable[h] || 0;
+                bonus += sqPts;
+                msgs.push(`${h}x${h} Square! +${sqPts}`);
+            }
+        } else {
+            loopCombo = 0;
+        }
+
+        if (msgs.length > 0) showBonus(msgs.join("\n"));
+        return bonus;
     }
 
     function hasPossibleMoves() {
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                const dot = grid[r][c];
-                if (!dot) continue;
-                for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-                    const nr = r + dr, nc = c + dc;
-                    if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc]?.color === dot.color) return true;
-                }
+        for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+            const dot = grid[r][c]; if (!dot) continue;
+            for (const [dr, dc] of [[1, 0], [0, 1]]) {
+                const nr = r + dr, nc = c + dc;
+                if (nr < ROWS && nc < COLS && grid[nr][nc]?.color === dot.color) return true;
             }
         }
         return false;
@@ -177,50 +158,21 @@
 
     function shuffleGrid() {
         const colors = [];
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                if (grid[r][c]) colors.push(grid[r][c].color);
-            }
-        }
+        grid.forEach(row => row.forEach(d => d && colors.push(d.color)));
         for (let i = colors.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [colors[i], colors[j]] = [colors[j], colors[i]];
         }
         let idx = 0;
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                if (grid[r][c]) grid[r][c].color = colors[idx++];
-            }
-        }
-    }
-
-    function ensurePossibleMoves(animate = true) {
-        if (!hasPossibleMoves()) {
-            if (animate) {
-                startShuffleAnimation();
-            } else {
-                let attempts = 0;
-                while (!hasPossibleMoves() && attempts < 100) {
-                    shuffleGrid();
-                    attempts++;
-                }
-            }
-        }
+        for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (grid[r][c]) grid[r][c].color = colors[idx++];
     }
 
     function startShuffleAnimation() {
-        if (isShuffling) return;
         isShuffling = true;
         let count = 0;
         const interval = setInterval(() => {
             shuffleGrid();
-            shuffleScale = 0.5 + Math.random() * 0.5;
-            count++;
-            if (count > 10 && hasPossibleMoves()) {
-                clearInterval(interval);
-                isShuffling = false;
-                shuffleScale = 1.0;
-            }
+            if (++count > 8 && hasPossibleMoves()) { clearInterval(interval); isShuffling = false; }
         }, 100);
     }
 
@@ -228,178 +180,113 @@
         for (let c = 0; c < COLS; c++) {
             let empty = 0;
             for (let r = ROWS - 1; r >= 0; r--) {
-                if (!grid[r][c]) {
-                    empty++;
-                } else if (empty > 0) {
+                if (!grid[r][c]) empty++;
+                else if (empty > 0) {
                     grid[r + empty][c] = grid[r][c];
-                    grid[r + empty][c].targetY = (r + empty) * SPACING + SPACING / 2;
+                    grid[r + empty][c].targetY = (r + empty) * SPACING + 25;
                     grid[r][c] = null;
                 }
             }
             for (let r = 0; r < empty; r++) {
-                grid[r][c] = createDot(r, c, COLORS[Math.floor(Math.random() * COLORS.length)]);
-                grid[r][c].visualY = (r - empty) * SPACING - 50;
-                grid[r][c].vy = 15;
+                grid[r][c] = { color: COLORS[Math.floor(Math.random()*COLORS.length)], visualY: (r-empty)*SPACING, targetY: r*SPACING+25, vy: 10 };
             }
         }
     }
 
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        particles.forEach((p, i) => {
-            p.update(); p.draw(ctx);
-            if (p.life <= 0) particles.splice(i, 1);
-        });
+        particles.forEach((p, i) => { p.update(); p.draw(ctx); if (p.life <= 0) particles.splice(i, 1); });
 
-        if (selectedPath.length > 0 && !isShuffling) {
-            const color = grid[selectedPath[0].r][selectedPath[0].c].color;
-            ctx.beginPath();
-            ctx.lineWidth = 6; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = color;
+        if (selectedPath.length > 0) {
+            ctx.beginPath(); ctx.lineWidth = 6; ctx.strokeStyle = grid[selectedPath[0].r][selectedPath[0].c].color;
             selectedPath.forEach((p, i) => {
-                const x = p.c * SPACING + SPACING / 2;
-                const y = grid[p.r][p.c]?.visualY ?? p.r * SPACING + SPACING / 2;
+                const x = p.c * SPACING + 25, y = grid[p.r][p.c].visualY;
                 i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
             });
             ctx.stroke();
         }
 
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                const dot = grid[r][c]; if (!dot) continue;
-                if (!isShuffling) {
-                    dot.vy += (dot.targetY - dot.visualY) * BOUNCE_STRENGTH;
-                    dot.vy *= FRICTION; dot.visualY += dot.vy;
-                }
-                const x = c * SPACING + SPACING / 2;
-                ctx.save();
-                ctx.translate(x, dot.visualY);
-                if (isShuffling) ctx.scale(shuffleScale, shuffleScale);
-                ctx.beginPath(); ctx.arc(0, 0, DOT_SIZE, 0, Math.PI * 2);
-                ctx.fillStyle = dot.color; ctx.fill();
-                if (selectedPath.some(p => p.r === r && p.c === c) && !isShuffling) {
-                    ctx.lineWidth = 3; ctx.strokeStyle = 'white'; ctx.stroke();
-                }
-                ctx.restore();
-            }
+        for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+            const dot = grid[r][c]; if (!dot) continue;
+            dot.vy += (dot.targetY - dot.visualY) * 0.15; dot.vy *= 0.6; dot.visualY += dot.vy;
+            ctx.save(); ctx.translate(c*SPACING+25, dot.visualY);
+            ctx.beginPath(); ctx.arc(0, 0, DOT_SIZE, 0, Math.PI*2); ctx.fillStyle = dot.color; ctx.fill();
+            if (selectedPath.some(p => p.r === r && p.c === c)) { ctx.lineWidth = 3; ctx.strokeStyle = 'white'; ctx.stroke(); }
+            ctx.restore();
         }
         requestAnimationFrame(draw);
     }
 
-    function checkBonuses() {
-        let bonus = 0;
-        let bonusTexts = [];
-        if (selectedPath.length === 6) {
-            const allSameRow = selectedPath.every(p => p.r === selectedPath[0].r);
-            const allSameCol = selectedPath.every(p => p.c === selectedPath[0].c);
-            if (allSameRow || allSameCol) { bonus += 5; bonusTexts.push("Straight 6! +5"); }
-        }
-        if (isLooping) {
-            loopCombo++;
-            if (loopCombo >= 2) {
-                const comboPoints = (loopCombo - 1) * 5;
-                bonus += comboPoints; bonusTexts.push(`${loopCombo} Combo! +${comboPoints}`);
-            }
-            const rows = selectedPath.map(p => p.r), cols = selectedPath.map(p => p.c);
-            const height = Math.max(...rows) - Math.min(...rows) + 1;
-            const width = Math.max(...cols) - Math.min(...cols) + 1;
-            if (height === width && height >= 3) {
-                const sPoint = { 3: 10, 4: 20, 5: 30, 6: 50 }[height] || 0;
-                bonus += sPoint; bonusTexts.push(`${height}x${height} Square! +${sPoint}`);
-            }
-        } else {
-            loopCombo = 0;
-        }
-        if (bonus > 0) showBonusEffect(bonusTexts.join(" / "));
-        return bonus;
-    }
-
-    function getCanvasXY(e) {
+    const getPos = (e) => {
         const rect = canvas.getBoundingClientRect();
-        const t = e.touches?.[0] ?? e.changedTouches?.[0] ?? e;
-        return { x: t.clientX - rect.left, y: t.clientY - rect.top };
-    }
-    function getGridPos(x, y) {
-        const c = Math.floor(x / SPACING), r = Math.floor(y / SPACING);
+        const t = e.touches ? e.touches[0] : e;
+        const c = Math.floor((t.clientX - rect.left) / SPACING), r = Math.floor((t.clientY - rect.top) / SPACING);
         return (r >= 0 && r < ROWS && c >= 0 && c < COLS) ? { r, c } : null;
-    }
+    };
 
     canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault(); if (isShuffling) return;
-        initAudio();
-        const { x, y } = getCanvasXY(e);
-        const pos = getGridPos(x, y);
-        if (pos && grid[pos.r][pos.c]) {
-            isDragging = true; selectedPath = [pos]; isLooping = false;
-            playDotSound(0);
-        }
-    }, { passive: false });
+        e.preventDefault(); if (isShuffling) return; startTimer();
+        const pos = getPos(e);
+        if (pos && grid[pos.r][pos.c]) { isDragging = true; selectedPath = [pos]; isLooping = false; }
+    });
 
     canvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        if (!isDragging || isShuffling) return;
-        const { x, y } = getCanvasXY(e);
-        const pos = getGridPos(x, y); if (!pos) return;
+        if (!isDragging) return;
+        const pos = getPos(e); if (!pos) return;
         const last = selectedPath[selectedPath.length - 1];
         if (pos.r === last.r && pos.c === last.c) return;
-        const color = grid[selectedPath[0].r][selectedPath[0].c].color;
         if (Math.abs(pos.r - last.r) + Math.abs(pos.c - last.c) !== 1) return;
-        if (grid[pos.r][pos.c]?.color !== color) return;
+        if (grid[pos.r][pos.c].color !== grid[selectedPath[0].r][selectedPath[0].c].color) return;
 
         const idx = selectedPath.findIndex(p => p.r === pos.r && p.c === pos.c);
-        if (idx === -1) {
-            selectedPath.push(pos);
-            playDotSound(selectedPath.length - 1, isLooping);
-        } else if (idx === selectedPath.length - 2) {
-            selectedPath.pop(); isLooping = false;
-        } else if (selectedPath.length >= 3) {
-            selectedPath.push(pos); isLooping = true;
-            playDotSound(selectedPath.length - 1, true);
-        }
-    }, { passive: false });
+        if (idx === -1) { selectedPath.push(pos); isLooping = false; }
+        else if (idx === selectedPath.length - 2) { selectedPath.pop(); isLooping = false; }
+        else { isLooping = true; selectedPath.push(pos); }
+    });
 
-    canvas.addEventListener('touchend', (e) => {
-        if (!isDragging) return;
-        isDragging = false;
-        let baseScore = 0;
-        const bonusScore = checkBonuses();
-        if (isLooping && selectedPath.length >= 4) {
+    canvas.addEventListener('touchend', () => {
+        if (!isDragging) return; isDragging = false;
+        if (selectedPath.length >= 2) {
+            saveHistory();
             const color = grid[selectedPath[0].r][selectedPath[0].c].color;
-            playClearSound(true);
-            for (let r = 0; r < ROWS; r++) {
-                for (let c = 0; c < COLS; c++) {
+            let baseScore = 0;
+
+            if (isLooping) {
+                for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
                     if (grid[r][c]?.color === color) {
-                        for (let i = 0; i < 5; i++) particles.push(new Particle(c * SPACING + SPACING / 2, grid[r][c].visualY, color));
+                        particles.push(new Particle(c*SPACING+25, grid[r][c].visualY, color));
                         grid[r][c] = null; baseScore++;
                     }
                 }
+            } else {
+                selectedPath.forEach(p => {
+                    if (grid[p.r][p.c]) {
+                        particles.push(new Particle(p.c*SPACING+25, grid[p.r][p.c].visualY, color));
+                        grid[p.r][p.c] = null; baseScore++;
+                    }
+                });
             }
-        } else if (selectedPath.length >= 2) {
-            playClearSound(false);
-            selectedPath.forEach(p => {
-                if (grid[p.r][p.c]) {
-                    for (let i = 0; i < 5; i++) particles.push(new Particle(p.c * SPACING + SPACING / 2, grid[p.r][p.c].visualY, grid[p.r][p.c].color));
-                    grid[p.r][p.c] = null; baseScore++;
-                }
-            });
-        }
-        if (baseScore > 0) {
-            dropDots();
-            setTimeout(() => ensurePossibleMoves(true), 500);
-        }
-        updateScore(score + baseScore + bonusScore);
-        selectedPath = []; isLooping = false;
-    }, { passive: false });
 
-    document.getElementById('resetBtn').addEventListener('click', () => {
-        if(confirm("Scoreをリセットして新しく始めますか？")) {
-            updateScore(0); initGrid();
+            const specialBonus = calculateSpecialBonuses();
+            updateScore(score + baseScore + specialBonus);
+            dropDots();
+            setTimeout(() => { if (!hasPossibleMoves()) startShuffleAnimation(); }, 500);
+        }
+        selectedPath = []; isLooping = false;
+    });
+
+    document.getElementById('undoBtn').addEventListener('click', () => {
+        if (history.length > 0 && score >= UNDO_COST) {
+            const last = history.pop(); grid = last.grid; updateScore(score - UNDO_COST);
         }
     });
 
+    document.getElementById('resetBtn').addEventListener('click', () => {
+        if(confirm("Reset?")) { localStorage.clear(); location.reload(); }
+    });
+
     canvas.width = COLS * SPACING; canvas.height = ROWS * SPACING;
-    initGrid();
-    requestAnimationFrame(draw);
+    initGrid(); updateScore(score); requestAnimationFrame(draw);
 </script>
 </body>
 </html>
